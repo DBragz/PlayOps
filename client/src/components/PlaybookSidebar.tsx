@@ -32,7 +32,6 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { ClientPlay } from "@/lib/playStore";
 import type { SportType } from "@shared/schema";
-import { Circle, Hexagon, Pentagon, Square, Diamond, Octagon, Layout } from "lucide-react";
 
 interface PlaybookSidebarProps {
   plays: ClientPlay[];
@@ -44,14 +43,14 @@ interface PlaybookSidebarProps {
   onRenamePlay: (playId: string, name: string) => void;
 }
 
-const sportIcons: Record<SportType, React.ComponentType<{ className?: string }>> = {
-  basketball: Circle,
-  football: Hexagon,
-  soccer: Pentagon,
-  volleyball: Square,
-  hockey: Diamond,
-  baseball: Octagon,
-  custom: Layout,
+const sportEmojis: Record<SportType, string> = {
+  basketball: "🏀",
+  football: "🏈",
+  soccer: "⚽",
+  volleyball: "🏐",
+  hockey: "🏒",
+  baseball: "⚾",
+  custom: "📋",
 };
 
 const sportLabels: Record<SportType, string> = {
@@ -154,10 +153,7 @@ export function PlaybookSidebar({
                   onClick={() => onSelectPlay(play.id)}
                   data-testid={`play-item-${play.id}`}
                 >
-                  {(() => {
-                    const Icon = sportIcons[play.sport as SportType];
-                    return <Icon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />;
-                  })()}
+                  <span className="text-lg mt-0.5 flex-shrink-0">{sportEmojis[play.sport as SportType]}</span>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{play.name}</p>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -247,21 +243,18 @@ export function PlaybookSidebar({
             <div className="space-y-2">
               <Label>Sport</Label>
               <div className="grid grid-cols-4 gap-2">
-                {(Object.keys(sportLabels) as SportType[]).map((sport) => {
-                  const Icon = sportIcons[sport];
-                  return (
-                    <Button
-                      key={sport}
-                      variant={newPlaySport === sport ? "default" : "outline"}
-                      className="flex flex-col h-auto py-2"
-                      onClick={() => setNewPlaySport(sport)}
-                      data-testid={`sport-select-${sport}`}
-                    >
-                      <Icon className="h-5 w-5 mb-1" />
-                      <span className="text-xs">{sportLabels[sport]}</span>
-                    </Button>
-                  );
-                })}
+                {(Object.keys(sportLabels) as SportType[]).map((sport) => (
+                  <Button
+                    key={sport}
+                    variant={newPlaySport === sport ? "default" : "outline"}
+                    className="flex flex-col h-auto py-2"
+                    onClick={() => setNewPlaySport(sport)}
+                    data-testid={`sport-select-${sport}`}
+                  >
+                    <span className="text-xl mb-1">{sportEmojis[sport]}</span>
+                    <span className="text-xs">{sportLabels[sport]}</span>
+                  </Button>
+                ))}
               </div>
             </div>
           </div>

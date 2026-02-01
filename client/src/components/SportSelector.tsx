@@ -5,7 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Circle, Hexagon, Pentagon, Square, Diamond, Octagon, Layout } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { SportType } from "@shared/schema";
 
 interface SportSelectorProps {
@@ -13,14 +13,14 @@ interface SportSelectorProps {
   onSportChange: (sport: SportType) => void;
 }
 
-const sportIcons: Record<SportType, React.ComponentType<{ className?: string }>> = {
-  basketball: Circle,
-  football: Hexagon,
-  soccer: Pentagon,
-  volleyball: Square,
-  hockey: Diamond,
-  baseball: Octagon,
-  custom: Layout,
+const sportEmojis: Record<SportType, string> = {
+  basketball: "🏀",
+  football: "🏈",
+  soccer: "⚽",
+  volleyball: "🏐",
+  hockey: "🏒",
+  baseball: "⚾",
+  custom: "📋",
 };
 
 const sports: { id: SportType; label: string }[] = [
@@ -35,32 +35,28 @@ const sports: { id: SportType; label: string }[] = [
 
 export function SportSelector({ currentSport, onSportChange }: SportSelectorProps) {
   const current = sports.find((s) => s.id === currentSport) || sports[0];
-  const CurrentIcon = sportIcons[current.id];
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" className="gap-2" data-testid="sport-selector">
-          <CurrentIcon className="h-4 w-4 text-primary" />
+          <span className="text-lg">{sportEmojis[current.id]}</span>
           <span>{current.label}</span>
           <ChevronDown className="h-4 w-4 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        {sports.map((sport) => {
-          const Icon = sportIcons[sport.id];
-          return (
-            <DropdownMenuItem
-              key={sport.id}
-              onClick={() => onSportChange(sport.id)}
-              className="gap-2"
-              data-testid={`sport-option-${sport.id}`}
-            >
-              <Icon className="h-4 w-4 text-primary" />
-              <span>{sport.label}</span>
-            </DropdownMenuItem>
-          );
-        })}
+        {sports.map((sport) => (
+          <DropdownMenuItem
+            key={sport.id}
+            onClick={() => onSportChange(sport.id)}
+            className="gap-2"
+            data-testid={`sport-option-${sport.id}`}
+          >
+            <span className="text-lg">{sportEmojis[sport.id]}</span>
+            <span>{sport.label}</span>
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );
