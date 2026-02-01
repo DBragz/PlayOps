@@ -37,9 +37,20 @@ npm run dev
 
 4. Open your browser and navigate to `http://localhost:5000`
 
-## Application Overview
+## Current State
 
-### Features
+MVP complete with the following features:
+- Canvas-based drawing surface with pan, zoom, and layered rendering
+- Sport surface templates (basketball, football, soccer, volleyball, hockey, baseball, custom)
+- Draggable player objects with team colors and jersey numbers
+- Route drawing tools with straight lines, curved paths, arrowheads
+- Freehand drawing, text annotations, eraser, undo/redo
+- Playbook library with search/filter functionality
+- Animation timeline with playback controls
+- Dark mode toggle with Haikyuu-inspired orange/black theme
+- LocalStorage persistence for plays
+
+## Features
 
 - **Canvas-Based Drawing Surface**: Pan, zoom, and layered rendering using Konva.js
 - **Sport Surface Templates**: Basketball, football, soccer, volleyball, hockey, baseball, and custom surfaces
@@ -100,16 +111,22 @@ playops/
 |------|---------|
 | schema.ts | Zod schemas for Play, Player, Route, Annotation types |
 
-### Key Components
+### Key Files
 
 | Component | File | Description |
 |-----------|------|-------------|
-| DrawingCanvas | `client/src/components/DrawingCanvas.tsx` | Main Konva canvas with all drawing logic |
+| Home | `client/src/pages/Home.tsx` | Main application page |
+| DrawingCanvas | `client/src/components/DrawingCanvas.tsx` | Konva canvas with all drawing logic |
 | SportSurface | `client/src/components/SportSurface.tsx` | Sport court/field template rendering |
 | ToolPalette | `client/src/components/ToolPalette.tsx` | Drawing tools sidebar |
 | PlaybookSidebar | `client/src/components/PlaybookSidebar.tsx` | Play library with search/filter |
 | AnimationControls | `client/src/components/AnimationControls.tsx` | Timeline playback controls |
 | ThemeToggle | `client/src/components/ThemeToggle.tsx` | Dark/light mode switcher |
+| playStore | `client/src/lib/playStore.ts` | LocalStorage persistence |
+| undoRedo | `client/src/lib/undoRedo.ts` | Undo/redo history management |
+| routes | `server/routes.ts` | API endpoints |
+| storage | `server/storage.ts` | Backend storage with seed data |
+| schema | `shared/schema.ts` | Data models and validation schemas |
 
 ### Data Flow
 
@@ -157,6 +174,26 @@ The application features a Haikyuu anime-inspired aesthetic:
 | `npm run dev` | Start development server |
 | `npm run build` | Build for production |
 | `npm run start` | Start production server |
+
+## Development Notes
+
+- Frontend uses localStorage for persistence (MVP)
+- Backend API available for future multi-device sync
+- Touch-optimized for mobile/tablet devices
+- Dark mode toggle in top-right corner
+
+## Recent Changes
+
+- 2026-02-01: Initial MVP implementation
+  - Canvas drawing with Konva.js
+  - Sport templates for 6 sports + custom
+  - Player markers with team colors
+  - Route and freehand drawing tools
+  - Undo/redo system
+  - Playbook management with localStorage
+  - Animation playback controls
+  - Dark mode with theme toggle
+  - Haikyuu-inspired color scheme
 
 ## Browser Support
 
