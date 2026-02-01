@@ -382,12 +382,36 @@ export function DrawingCanvas({
     setTextInput(null);
   };
 
+  const findClosestRouteForPlayer = (player: PlayerObject): Route | null => {
+    let closestRoute: Route | null = null;
+    let closestDistance = Infinity;
+
+    for (const route of playData.routes) {
+      if (route.points.length < 2) continue;
+      
+      const routeStart = route.points[0];
+      const distance = Math.sqrt(
+        Math.pow(routeStart.x - player.position.x, 2) + 
+        Math.pow(routeStart.y - player.position.y, 2)
+      );
+      
+      if (distance < closestDistance && distance < 50) {
+        closestDistance = distance;
+        closestRoute = route;
+      }
+    }
+    
+    return closestRoute;
+  };
+
   const getAnimatedPlayerPosition = (player: PlayerObject): { x: number; y: number } => {
-    if (!isAnimating || !playData.animationKeyframes?.length) {
+    if (animationProgress === 0) {
       return player.position;
     }
 
-    const playerRoute = playData.routes.find((r) => r.playerId === player.id);
+    const playerRoute = playData.routes.find((r) => r.playerId === player.id) 
+      || findClosestRouteForPlayer(player);
+    
     if (!playerRoute || playerRoute.points.length < 2) {
       return player.position;
     }
@@ -517,7 +541,8 @@ export function DrawingCanvas({
         <Layer>
           {playData.players.map((player) => {
             const animatedPos = getAnimatedPlayerPosition(player);
-            const displayPlayer = isAnimating ? { ...player, position: animatedPos } : player;
+            const isShowingAnimation = animationProgress > 0 || isAnimating;
+            const displayPlayer = isShowingAnimation ? { ...player, position: animatedPos } : player;
             
             return (
               <PlayerMarker
@@ -527,7 +552,7 @@ export function DrawingCanvas({
                 isDragging={false}
                 onDragStart={() => {}}
                 onDragMove={() => {}}
-                onDragEnd={(pos) => handlePlayerDragEnd(player.id, pos)}
+                onDragEnd={(pos) => !isShowingAnimation && handlePlayerDragEnd(player.id, pos)}
                 onClick={() => onSelectElement(player.id)}
               />
             );
