@@ -2,7 +2,16 @@
 
 ## Overview
 
-PlayOps is a responsive browser-based sports play-drawing whiteboard application for coaches. It enables users to design, animate, and share plays for various sports including basketball, football, soccer, volleyball, hockey, and baseball. The application features a canvas-based drawing interface with support for player positioning, route drawing, freehand annotations, and animated playback of plays.
+PlayOps is a responsive browser-based sports play-drawing whiteboard application for coaches. It enables users to design, animate, and share plays for various sports (basketball, football, soccer, volleyball, hockey, baseball, or custom) using an intuitive canvas-based interface. The application features a Haikyuu anime-inspired orange/black theme with full dark mode support.
+
+Key capabilities include:
+- Canvas-based drawing surface with pan, zoom, and layered rendering
+- Draggable player objects with team colors and jersey numbers
+- Route drawing tools (straight lines, curved paths, arrowheads)
+- Freehand drawing, text annotations, eraser, and undo/redo
+- Playbook library with search/filter functionality
+- Animation timeline with playback controls
+- Sport-specific field templates
 
 ## User Preferences
 
@@ -11,69 +20,80 @@ Preferred communication style: Simple, everyday language.
 ## System Architecture
 
 ### Frontend Architecture
-- **Framework**: React 18 with TypeScript
-- **Routing**: Wouter for lightweight client-side routing
-- **State Management**: TanStack React Query for server state, React useState/useCallback for local state
-- **UI Components**: shadcn/ui component library built on Radix UI primitives
-- **Styling**: Tailwind CSS with custom Haikyuu-inspired orange/black theme supporting light and dark modes
-- **Canvas Rendering**: Konva.js (react-konva) for the drawing canvas with layered rendering, pan, and zoom support
-- **Build Tool**: Vite for development and production builds
+
+**Framework**: React 18 with TypeScript, built using Vite
+- Single-page application with client-side routing via Wouter
+- State management using React Query for server state and local React hooks for UI state
+- Canvas rendering powered by Konva.js (react-konva) for high-performance 2D graphics
+
+**UI Component Library**: shadcn/ui with Radix UI primitives
+- Tailwind CSS for styling with CSS custom properties for theming
+- New York style variant configured in components.json
+- Path aliases: `@/` for client/src, `@shared/` for shared types
+
+**Key Frontend Patterns**:
+- ThemeProvider context for dark/light mode management
+- Custom undo/redo history system for play editing
+- Local storage persistence for plays (playStore.ts)
+- Modular canvas components (PlayerMarker, RouteLine, SportSurface)
 
 ### Backend Architecture
-- **Runtime**: Node.js with Express.js
-- **API Design**: RESTful endpoints under `/api/` prefix for CRUD operations on plays
-- **Development**: Hot module replacement via Vite middleware in development mode
-- **Production**: Static file serving from built assets
 
-### Data Storage
-- **Database**: PostgreSQL with Drizzle ORM
-- **Schema Location**: `shared/schema.ts` contains all database table definitions and Zod validation schemas
-- **Migrations**: Drizzle Kit for database migrations stored in `/migrations`
-- **Fallback**: In-memory storage implementation available for development without database
+**Framework**: Express.js with TypeScript running on Node.js
+- HTTP server created via `createServer` for potential WebSocket support
+- Development mode uses Vite middleware for HMR
+- Production mode serves static files from dist/public
 
-### Key Design Patterns
-- **Shared Types**: TypeScript types and Zod schemas in `shared/` directory are used by both client and server
-- **Undo/Redo System**: Custom history state management for canvas operations
-- **Component Architecture**: Separation of canvas components (PlayerMarker, RouteLine, SportSurface) from UI components
-- **Play Data Model**: Serializable JSON structure containing players, routes, freehand drawings, text annotations, and animation keyframes
+**API Design**: RESTful endpoints under `/api/` prefix
+- CRUD operations for plays: GET/POST/PUT/DELETE `/api/plays`
+- JSON request/response format with Zod validation
 
-### Project Structure
-```
-├── client/           # Frontend React application
-│   ├── src/
-│   │   ├── components/   # React components including canvas and UI
-│   │   ├── pages/        # Route page components
-│   │   ├── hooks/        # Custom React hooks
-│   │   └── lib/          # Utilities, stores, and query client
-├── server/           # Backend Express application
-│   ├── index.ts      # Server entry point
-│   ├── routes.ts     # API route definitions
-│   └── storage.ts    # Data access layer
-├── shared/           # Shared types and schemas
-│   └── schema.ts     # Drizzle schema and Zod validators
-└── migrations/       # Database migration files
-```
+**Storage Layer**: Interface-based storage abstraction (IStorage)
+- Currently implements in-memory storage (MemStorage)
+- Designed for easy database integration via Drizzle ORM
+
+### Data Layer
+
+**ORM**: Drizzle ORM configured for PostgreSQL
+- Schema defined in `shared/schema.ts` using drizzle-zod for validation
+- Migrations output to `/migrations` directory
+- DATABASE_URL environment variable required for database connection
+
+**Data Model**: Play-centric structure with nested JSON data
+- Plays contain: players, routes, freehand drawings, text annotations
+- Animation keyframes and view transforms stored in PlayData
+- Tags and sport type for organization and filtering
+
+### Build System
+
+**Development**: `npm run dev` runs tsx with Vite middleware
+**Production Build**: Custom build script using esbuild + Vite
+- Frontend bundled to dist/public via Vite
+- Backend bundled to dist/index.cjs via esbuild
+- Selective dependency bundling for faster cold starts
 
 ## External Dependencies
 
 ### Database
-- **PostgreSQL**: Primary database accessed via `DATABASE_URL` environment variable
-- **Drizzle ORM**: Type-safe database access with automatic schema migrations
+- **PostgreSQL**: Primary database (requires DATABASE_URL environment variable)
+- **Drizzle ORM**: Type-safe database queries and schema management
+- **connect-pg-simple**: PostgreSQL session storage support
 
-### UI Framework
-- **Radix UI**: Headless UI components for accessibility
-- **shadcn/ui**: Pre-styled component collection configured in `components.json`
+### Frontend Libraries
+- **Konva/react-konva**: Canvas 2D rendering engine for the drawing surface
+- **@tanstack/react-query**: Server state management and caching
+- **Radix UI**: Accessible UI component primitives (dialog, dropdown, tooltip, etc.)
 - **Tailwind CSS**: Utility-first CSS framework
+- **date-fns**: Date formatting utilities
+- **uuid**: Unique identifier generation
 
-### Canvas & Graphics
-- **Konva.js**: 2D canvas library for drawing surfaces, players, routes, and annotations
-- **react-konva**: React bindings for Konva
-
-### Session Management
-- **connect-pg-simple**: PostgreSQL session store for Express sessions
-- **express-session**: Server-side session handling
+### Backend Libraries
+- **Express**: Web server framework
+- **Zod**: Runtime schema validation
+- **drizzle-zod**: Zod schema generation from Drizzle tables
 
 ### Development Tools
 - **Vite**: Frontend build tool with HMR
-- **tsx**: TypeScript execution for development server
-- **esbuild**: Production bundling for server code
+- **esbuild**: Fast JavaScript bundler for server
+- **tsx**: TypeScript execution for development
+- **TypeScript**: Static type checking across the codebase

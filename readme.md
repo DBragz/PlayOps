@@ -204,8 +204,8 @@ The application features a Haikyuu anime-inspired aesthetic:
 
 ## Authors
 
-- **Claude** - AI Development Assistant
 - **You** - Project Creator & Designer
+- **Claude (Anthropic)** - AI Development Assistant
 
 ## License
 
