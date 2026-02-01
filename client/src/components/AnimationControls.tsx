@@ -79,7 +79,7 @@ export function AnimationControls({
           onValueChange={(value) => onProgressChange(value[0] / 100)}
           max={100}
           step={0.5}
-          className="flex-1 [&_[role=slider]]:h-5 [&_[role=slider]]:w-5 [&_[role=slider]]:border-2 [&_[role=slider]]:border-primary [&_[role=slider]]:bg-primary [&_[role=slider]]:shadow-lg [&>span:first-child]:h-3 [&>span:first-child]:rounded-full [&>span:first-child>span]:h-3 [&>span:first-child>span]:rounded-full"
+          className="flex-1 [&_[role=slider]]:h-6 [&_[role=slider]]:w-6 [&_[role=slider]]:border-3 [&_[role=slider]]:border-white [&_[role=slider]]:bg-primary [&_[role=slider]]:shadow-xl [&>span:first-child]:h-4 [&>span:first-child]:rounded-full [&>span:first-child]:bg-muted-foreground/30 [&>span:first-child>span]:h-4 [&>span:first-child>span]:rounded-full [&>span:first-child>span]:bg-primary"
           data-testid="slider-progress"
         />
         <span className="text-sm font-medium text-foreground w-12 text-right">
