@@ -70,19 +70,19 @@ export function AnimationControls({
         </Tooltip>
       </div>
 
-      <div className="flex-1 flex items-center gap-2">
-        <span className="text-xs text-muted-foreground w-10">
+      <div className="flex-1 flex items-center gap-3">
+        <span className="text-sm font-medium text-foreground w-12">
           {formatTime(progress * duration)}
         </span>
         <Slider
           value={[progress * 100]}
           onValueChange={(value) => onProgressChange(value[0] / 100)}
           max={100}
-          step={1}
-          className="flex-1"
+          step={0.5}
+          className="flex-1 [&_[role=slider]]:h-5 [&_[role=slider]]:w-5 [&_[role=slider]]:border-2 [&_[role=slider]]:border-primary [&_[role=slider]]:bg-primary [&_[role=slider]]:shadow-lg [&>span:first-child]:h-3 [&>span:first-child]:rounded-full [&>span:first-child>span]:h-3 [&>span:first-child>span]:rounded-full"
           data-testid="slider-progress"
         />
-        <span className="text-xs text-muted-foreground w-10">
+        <span className="text-sm font-medium text-foreground w-12 text-right">
           {formatTime(duration)}
         </span>
       </div>
