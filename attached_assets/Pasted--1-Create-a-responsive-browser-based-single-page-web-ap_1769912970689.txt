@@ -1,0 +1,21 @@
+	1.	Create a responsive, browser-based single-page web application shell that supports desktop, tablet, and mobile devices with both mouse and touch input.
+	2.	Implement a central drawing surface using a scalable coordinate system (Canvas or SVG) with support for pan, zoom, and layered rendering.
+	3.	Add sport surface templates (e.g., basketball court, football field) that scale correctly to different screen sizes and orientations.
+	4.	Implement draggable player objects with team color support, labels/numbers, and snap-to-position behavior.
+	5.	Implement route drawing tools that support straight lines, curved paths, arrowheads, and editable control points.
+	6.	Add freehand drawing, text annotations, eraser tools, and full undo/redo support.
+	7.	Define a structured, serializable data model for plays (players, routes, annotations, surfaces, and metadata).
+	8.	Implement save, load, duplicate, and delete functionality for plays using local or browser-based storage.
+	9.	Implement a play library (playbook) view with naming, tagging, and basic search/filter capabilities.
+	10.	Implement a timeline engine capable of time-based playback and interpolation of player movement.
+	11.	Animate player objects along drawn routes with adjustable playback speed, play/pause/reset controls.
+	12.	Implement step-by-step play breakdown mode with manual step advancement and player highlighting.
+	13.	Optimize all interactions for mobile and touch devices, including large touch targets and gesture support (pinch, tap, long-press).
+	14.	Implement shareable play links with read-only access and optional public/private visibility.
+	15.	Implement a presentation mode that hides editing controls and supports full-screen animated playback.
+	16.	Add commenting and annotation features for collaborative feedback on plays.
+	17.	Implement version history with automatic revision tracking and restore capability.
+	18.	Add role-based views (coach, assistant coach, player) with appropriate permissions and UI simplification.
+	19.	Implement support for play variations and branching routes (conditional or alternative outcomes).
+	20.	Add play status tracking (e.g., installed, practiced, retired) with notes per practice or game.
+	21.	Implement export functionality for plays, including images, GIFs, or video formats
