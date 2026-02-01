@@ -204,7 +204,7 @@ The application features a Haikyuu anime-inspired aesthetic:
 
 ## Authors
 
-- **You** - Project Creator & Designer
+- **[Daniel Ribeirinha-Braga](github.com/dbragz)** - Project Creator & Designer
 - **Claude (Anthropic)** - AI Development Assistant
 
 ## License
