@@ -50,6 +50,9 @@ export function DrawingCanvas({
   const [currentRoute, setCurrentRoute] = useState<Route | null>(null);
   const [nextPlayerNumber, setNextPlayerNumber] = useState(1);
   const [textInput, setTextInput] = useState<{ x: number; y: number; value: string } | null>(null);
+  const [lastTouchDistance, setLastTouchDistance] = useState<number | null>(null);
+  const [lastTouchCenter, setLastTouchCenter] = useState<{ x: number; y: number } | null>(null);
+  const [isTwoFingerGesture, setIsTwoFingerGesture] = useState(false);
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -74,6 +77,23 @@ export function DrawingCanvas({
       y: (pointer.y - stagePos.y) / stageScale,
     };
   }, [stagePos, stageScale]);
+
+  const getTouchDistance = (touches: TouchList): number => {
+    if (touches.length < 2) return 0;
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const getTouchCenter = (touches: TouchList): { x: number; y: number } => {
+    if (touches.length < 2) {
+      return { x: touches[0]?.clientX || 0, y: touches[0]?.clientY || 0 };
+    }
+    return {
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2,
+    };
+  };
 
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
@@ -102,6 +122,8 @@ export function DrawingCanvas({
   }, [stageScale, stagePos]);
 
   const handleMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if (isTwoFingerGesture) return;
+    
     const pos = getPointerPosition();
     if (!pos) return;
 
@@ -240,6 +262,82 @@ export function DrawingCanvas({
     }
   }, [isDrawing, currentRoute, currentDrawing, playData, onPlayDataChange, onSelectElement]);
 
+  const handleTouchStart = useCallback((e: Konva.KonvaEventObject<TouchEvent>) => {
+    const touches = e.evt.touches;
+    
+    if (touches.length === 2) {
+      e.evt.preventDefault();
+      setIsTwoFingerGesture(true);
+      setLastTouchDistance(getTouchDistance(touches));
+      setLastTouchCenter(getTouchCenter(touches));
+      setIsDrawing(false);
+      setCurrentRoute(null);
+      setCurrentDrawing(null);
+      return;
+    }
+    
+    handleMouseDown(e);
+  }, [handleMouseDown]);
+
+  const handleTouchMove = useCallback((e: Konva.KonvaEventObject<TouchEvent>) => {
+    const touches = e.evt.touches;
+    
+    if (touches.length === 2 && isTwoFingerGesture) {
+      e.evt.preventDefault();
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      const newDistance = getTouchDistance(touches);
+      const newCenter = getTouchCenter(touches);
+      
+      if (lastTouchDistance && lastTouchCenter) {
+        const scaleChange = newDistance / lastTouchDistance;
+        const oldScale = stageScale;
+        const newScale = Math.min(Math.max(oldScale * scaleChange, 0.1), 5);
+        
+        const stageBox = stage.container().getBoundingClientRect();
+        const centerX = newCenter.x - stageBox.left;
+        const centerY = newCenter.y - stageBox.top;
+        
+        const mousePointTo = {
+          x: (centerX - stagePos.x) / oldScale,
+          y: (centerY - stagePos.y) / oldScale,
+        };
+        
+        const dx = newCenter.x - lastTouchCenter.x;
+        const dy = newCenter.y - lastTouchCenter.y;
+        
+        setStageScale(newScale);
+        setStagePos({
+          x: centerX - mousePointTo.x * newScale + dx,
+          y: centerY - mousePointTo.y * newScale + dy,
+        });
+      }
+      
+      setLastTouchDistance(newDistance);
+      setLastTouchCenter(newCenter);
+      return;
+    }
+    
+    if (!isTwoFingerGesture) {
+      handleMouseMove(e);
+    }
+  }, [isTwoFingerGesture, lastTouchDistance, lastTouchCenter, stageScale, stagePos, handleMouseMove]);
+
+  const handleTouchEnd = useCallback((e: Konva.KonvaEventObject<TouchEvent>) => {
+    const touches = e.evt.touches;
+    
+    if (touches.length < 2) {
+      setIsTwoFingerGesture(false);
+      setLastTouchDistance(null);
+      setLastTouchCenter(null);
+    }
+    
+    if (!isTwoFingerGesture) {
+      handleMouseUp();
+    }
+  }, [isTwoFingerGesture, handleMouseUp]);
+
   const handleEraseElement = (id: string) => {
     onPlayDataChange({
       ...playData,
@@ -334,7 +432,12 @@ export function DrawingCanvas({
     <div
       ref={containerRef}
       className="relative w-full h-full overflow-hidden bg-background"
-      style={{ cursor: getCursor() }}
+      style={{ 
+        cursor: getCursor(),
+        touchAction: "none",
+        WebkitUserSelect: "none",
+        userSelect: "none",
+      }}
     >
       <Stage
         ref={stageRef}
@@ -348,10 +451,11 @@ export function DrawingCanvas({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onTouchStart={handleMouseDown}
-        onTouchMove={handleMouseMove}
-        onTouchEnd={handleMouseUp}
-        draggable={activeTool === "pan"}
+        onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        draggable={false}
       >
         <Layer>
           <SportSurface
