@@ -17,7 +17,8 @@ export function SportSurface({ sport, width, height, isDark }: SportSurfaceProps
 
   switch (sport) {
     case "basketball":
-      return <BasketballCourt width={width} height={height} lineColor={lineColor} courtColor={courtColor} isDark={isDark} />;
+      return <BasketballCourt width={width} height={height} lineColor={lineColor} courtColor={courtColor} isDark={isDark} />
+        // <img src="/basketball_court_1.jpg" width={width} height={height} />
     case "football":
       return <FootballField width={width} height={height} lineColor={fieldLineColor} fieldColor={grassColor} isDark={isDark} />;
     case "soccer":
