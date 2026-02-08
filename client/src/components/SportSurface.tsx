@@ -1,5 +1,6 @@
-import { Group, Rect, Line, Circle, Arc, Text } from "react-konva";
+import { Group, Rect, Line, Circle, Arc, Text, Image } from "react-konva";
 import type { SportType } from "@shared/schema";
+import useImage from "use-image";
 
 interface SportSurfaceProps {
   sport: SportType;
@@ -9,6 +10,7 @@ interface SportSurfaceProps {
 }
 
 export function SportSurface({ sport, width, height, isDark }: SportSurfaceProps) {
+  const [basketballCourt] = useImage("/basketball_court_1.jpg");
   const lineColor = isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(0, 0, 0, 0.6)";
   const fillColor = isDark ? "#1a2836" : "#e8d5c4";
   const courtColor = isDark ? "#2a3847" : "#d4a574";
@@ -17,8 +19,9 @@ export function SportSurface({ sport, width, height, isDark }: SportSurfaceProps
 
   switch (sport) {
     case "basketball":
-      return <BasketballCourt width={width} height={height} lineColor={lineColor} courtColor={courtColor} isDark={isDark} />
-        // <img src="/basketball_court_1.jpg" width={width} height={height} />
+      // return <BasketballCourt width={width} height={height} lineColor={lineColor} courtColor={courtColor} isDark={isDark} />
+      // return <img src="/basketball_court_1.jpg" />//width={width} height={height} />
+      return <Image image={basketballCourt} width={width} height={height} />;
     case "football":
       return <FootballField width={width} height={height} lineColor={fieldLineColor} fieldColor={grassColor} isDark={isDark} />;
     case "soccer":
