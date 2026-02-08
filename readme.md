@@ -10,14 +10,102 @@ A responsive browser-based sports play-drawing whiteboard application for coache
 |----------|---------|---------|
 | Node.js | 18.x or higher | JavaScript runtime for backend and build tools |
 | npm | 9.x or higher | Package manager (included with Node.js) |
-
-### Optional Software
-
-| Software | Version | Purpose |
-|----------|---------|---------|
 | Git | 2.x or higher | Version control |
 
+### Installing Prerequisites
+
+<details>
+<summary><strong>Windows</strong></summary>
+
+**Option A: Direct Installers**
+1. Download and install Node.js from [nodejs.org](https://nodejs.org/) (LTS version recommended). npm is included automatically.
+2. Download and install Git from [git-scm.com](https://git-scm.com/download/win).
+
+**Option B: Using Chocolatey (package manager)**
+```powershell
+# Install Chocolatey first (run PowerShell as Administrator):
+Set-ExecutionPolicy Bypass -Scope Process -Force; `
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; `
+iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+# Then install Node.js and Git:
+choco install nodejs-lts git -y
+```
+
+**Option C: Using winget (built into Windows 11 / Windows 10 App Installer)**
+```powershell
+winget install OpenJS.NodeJS.LTS
+winget install Git.Git
+```
+
+**Verify installation** (use PowerShell, Command Prompt, or Git Bash):
+```powershell
+node --version
+npm --version
+git --version
+```
+</details>
+
+<details>
+<summary><strong>macOS</strong></summary>
+
+**Option A: Direct Installer**
+1. Download and install Node.js from [nodejs.org](https://nodejs.org/) (LTS version recommended). npm is included automatically.
+2. Git is included with Xcode Command Line Tools. Install with: `xcode-select --install`
+
+**Option B: Using Homebrew (recommended)**
+```bash
+# Install Homebrew first (if not already installed):
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Then install Node.js and Git:
+brew install node git
+```
+
+**Verify installation** (use Terminal):
+```bash
+node --version
+npm --version
+git --version
+```
+</details>
+
+<details>
+<summary><strong>Linux (Ubuntu/Debian)</strong></summary>
+
+```bash
+# Update package list:
+sudo apt update
+
+# Install Node.js (via NodeSource for latest LTS):
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# Install Git:
+sudo apt install -y git
+```
+
+**For Fedora/RHEL:**
+```bash
+sudo dnf install nodejs git
+```
+
+**For Arch Linux:**
+```bash
+sudo pacman -S nodejs npm git
+```
+
+**Verify installation** (use Terminal):
+```bash
+node --version
+npm --version
+git --version
+```
+</details>
+
 ## Installation
+
+These steps are identical on Windows, macOS, and Linux. Use your platform's terminal (PowerShell/Command Prompt/Git Bash on Windows, Terminal on macOS/Linux).
 
 1. Clone the repository:
 ```bash
@@ -36,6 +124,8 @@ npm run dev
 ```
 
 4. Open your browser and navigate to `http://localhost:5000`
+
+> **Note:** All npm commands (`npm install`, `npm run dev`, `npm run build`, `npm start`) work identically across Windows, macOS, and Linux -- no platform-specific scripts are needed.
 
 ## Current State
 
