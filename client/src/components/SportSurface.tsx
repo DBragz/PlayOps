@@ -10,7 +10,13 @@ interface SportSurfaceProps {
 }
 
 export function SportSurface({ sport, width, height, isDark }: SportSurfaceProps) {
+  const [baseballField] = useImage("/baseball_field_1.jpg");
   const [basketballCourt] = useImage("/basketball_court_1.jpg");
+  const [footballField] = useImage("/football_field_1.jpg");
+  const [hockeyRink] = useImage("/hockey_rink_1.jpg");
+  const [soccerField] = useImage("/soccer_field_1.jpg");
+  const [volleyballCourt] = useImage("/volleyball_court_1.jpg");
+
   const lineColor = isDark ? "rgba(255, 255, 255, 0.6)" : "rgba(0, 0, 0, 0.6)";
   const fillColor = isDark ? "#1a2836" : "#e8d5c4";
   const courtColor = isDark ? "#2a3847" : "#d4a574";
@@ -19,19 +25,17 @@ export function SportSurface({ sport, width, height, isDark }: SportSurfaceProps
 
   switch (sport) {
     case "basketball":
-      // return <BasketballCourt width={width} height={height} lineColor={lineColor} courtColor={courtColor} isDark={isDark} />
-      // return <img src="/basketball_court_1.jpg" />//width={width} height={height} />
       return <Image image={basketballCourt} width={width} height={height} />;
     case "football":
-      return <FootballField width={width} height={height} lineColor={fieldLineColor} fieldColor={grassColor} isDark={isDark} />;
+      return <Image image={footballField} width={width} height={height} />;
     case "soccer":
-      return <SoccerField width={width} height={height} lineColor={fieldLineColor} fieldColor={grassColor} isDark={isDark} />;
+      return <Image image={soccerField} width={width} height={height} />;
     case "volleyball":
-      return <VolleyballCourt width={width} height={height} lineColor={lineColor} courtColor={courtColor} isDark={isDark} />;
+      return <Image image={volleyballCourt} width={width} height={height} />;
     case "hockey":
-      return <HockeyCourt width={width} height={height} lineColor={lineColor} courtColor={isDark ? "#1e4d6b" : "#bde0f4"} isDark={isDark} />;
+      return <Image image={hockeyRink} width={width} height={height} />;
     case "baseball":
-      return <BaseballField width={width} height={height} lineColor={lineColor} fieldColor={grassColor} isDark={isDark} />;
+      return <Image image={baseballField} width={width} height={height} />;
     case "custom":
     default:
       return <CustomSurface width={width} height={height} fillColor={fillColor} lineColor={lineColor} isDark={isDark} />;
