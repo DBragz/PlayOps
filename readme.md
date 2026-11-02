@@ -299,4 +299,4 @@ The application features a Haikyuu anime-inspired aesthetic:
 
 ## License
 
-This project is private and proprietary.
+This project is private and proprietary. It is not licensed for public use or redistribution.

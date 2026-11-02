@@ -25,6 +25,7 @@ import {
   teamColors,
   type ClientPlay,
 } from "@/lib/playStore";
+import { STARTER_TEMPLATES } from "@/lib/playTemplates";
 import { 
   createHistoryState, 
   pushState, 
@@ -209,6 +210,30 @@ export default function Home() {
     }
   }, [plays, toast]);
 
+  const handleCopyTemplate = useCallback((templateId: string) => {
+    const template = STARTER_TEMPLATES.find((item) => item.id === templateId);
+    if (!template) return;
+
+    const copiedPlay = {
+      ...createPlay(template.name, template.sport),
+      description: template.description,
+      tags: [...template.tags],
+      data: structuredClone(template.data),
+    };
+    const updatedPlays = [...plays, copiedPlay];
+    setPlays(updatedPlays);
+    savePlays(updatedPlays);
+    setCurrentPlayId(copiedPlay.id);
+    setPlayName(copiedPlay.name);
+    setHistory(createHistoryState(copiedPlay.data));
+    setSelectedElementId(null);
+    setSidebarOpen(false);
+    toast({
+      title: "Template Copied",
+      description: `"${template.name}" was copied to your plays.`,
+    });
+  }, [plays, toast]);
+
   const handleDeletePlay = useCallback((playId: string) => {
     const updatedPlays = plays.filter((p) => p.id !== playId);
     setPlays(updatedPlays);
@@ -322,12 +347,14 @@ export default function Home() {
             <SheetContent side="left" className="p-0 w-80">
               <PlaybookSidebar
                 plays={plays}
+                templates={STARTER_TEMPLATES}
                 currentPlayId={currentPlayId}
                 onSelectPlay={handleSelectPlay}
                 onCreatePlay={handleCreatePlay}
                 onDuplicatePlay={handleDuplicatePlay}
                 onDeletePlay={handleDeletePlay}
                 onRenamePlay={handleRenamePlay}
+                onCopyTemplate={handleCopyTemplate}
               />
             </SheetContent>
           </Sheet>

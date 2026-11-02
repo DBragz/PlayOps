@@ -1,4 +1,7 @@
-import { type User, type InsertUser, type Play, type InsertPlay } from "@shared/schema";
+import { and, desc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { type User, type InsertUser, type Play, type InsertPlay, plays, users } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -7,11 +10,11 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   
   // Plays CRUD operations
-  getPlays(): Promise<Play[]>;
-  getPlay(id: string): Promise<Play | undefined>;
-  createPlay(play: InsertPlay): Promise<Play>;
-  updatePlay(id: string, play: Partial<InsertPlay>): Promise<Play | undefined>;
-  deletePlay(id: string): Promise<boolean>;
+  getPlays(userId: string): Promise<Play[]>;
+  getPlay(id: string, userId: string): Promise<Play | undefined>;
+  createPlay(play: InsertPlay, userId: string): Promise<Play>;
+  updatePlay(id: string, play: Partial<InsertPlay>, userId: string): Promise<Play | undefined>;
+  deletePlay(id: string, userId: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -21,76 +24,6 @@ export class MemStorage implements IStorage {
   constructor() {
     this.users = new Map();
     this.plays = new Map();
-    this.seedPlays();
-  }
-
-  private seedPlays() {
-    const samplePlays: Play[] = [
-      {
-        id: randomUUID(),
-        name: "Pick and Roll",
-        description: "Classic basketball play",
-        sport: "basketball",
-        tags: ["offense", "basic"],
-        data: {
-          sport: "basketball",
-          players: [
-            { id: "p1", number: "1", teamColor: "#FF6B00", position: { x: 600, y: 500 }, size: 40 },
-            { id: "p2", number: "2", teamColor: "#FF6B00", position: { x: 500, y: 400 }, size: 40 },
-            { id: "p3", number: "3", teamColor: "#1E3A5F", position: { x: 650, y: 450 }, size: 40 },
-          ],
-          routes: [],
-          freehandDrawings: [],
-          textAnnotations: [],
-        },
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      {
-        id: randomUUID(),
-        name: "Zone Defense",
-        description: "2-3 zone defensive formation",
-        sport: "basketball",
-        tags: ["defense", "zone"],
-        data: {
-          sport: "basketball",
-          players: [
-            { id: "p1", number: "1", teamColor: "#1E3A5F", position: { x: 450, y: 300 }, size: 40 },
-            { id: "p2", number: "2", teamColor: "#1E3A5F", position: { x: 750, y: 300 }, size: 40 },
-            { id: "p3", number: "3", teamColor: "#1E3A5F", position: { x: 350, y: 450 }, size: 40 },
-            { id: "p4", number: "4", teamColor: "#1E3A5F", position: { x: 600, y: 450 }, size: 40 },
-            { id: "p5", number: "5", teamColor: "#1E3A5F", position: { x: 850, y: 450 }, size: 40 },
-          ],
-          routes: [],
-          freehandDrawings: [],
-          textAnnotations: [],
-        },
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      {
-        id: randomUUID(),
-        name: "Quick Sync Attack",
-        description: "Fast volleyball attack from setter",
-        sport: "volleyball",
-        tags: ["offense", "quick"],
-        data: {
-          sport: "volleyball",
-          players: [
-            { id: "p1", number: "1", teamColor: "#FF6B00", position: { x: 400, y: 400 }, size: 40 },
-            { id: "p2", number: "2", teamColor: "#FF6B00", position: { x: 600, y: 350 }, size: 40 },
-            { id: "p3", number: "3", teamColor: "#FF6B00", position: { x: 500, y: 500 }, size: 40 },
-          ],
-          routes: [],
-          freehandDrawings: [],
-          textAnnotations: [],
-        },
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-    ];
-
-    samplePlays.forEach((play) => this.plays.set(play.id, play));
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -105,33 +38,44 @@ export class MemStorage implements IStorage {
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { ...insertUser, id };
+    const user: User = {
+      ...insertUser,
+      id,
+      email: null,
+      stripeCustomerId: null,
+      subscriptionStatus: "free",
+      subscriptionCurrentPeriodEnd: null,
+      manualPro: false,
+    };
     this.users.set(id, user);
     return user;
   }
 
-  async getPlays(): Promise<Play[]> {
-    return Array.from(this.plays.values()).sort((a, b) => {
+  async getPlays(userId: string): Promise<Play[]> {
+    return Array.from(this.plays.values()).filter((play) => play.userId === userId).sort((a, b) => {
       const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
       const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
       return dateB - dateA;
     });
   }
 
-  async getPlay(id: string): Promise<Play | undefined> {
-    return this.plays.get(id);
+  async getPlay(id: string, userId: string): Promise<Play | undefined> {
+    const play = this.plays.get(id);
+    return play?.userId === userId ? play : undefined;
   }
 
-  async createPlay(insertPlay: InsertPlay): Promise<Play> {
+  async createPlay(insertPlay: InsertPlay, userId: string): Promise<Play> {
     const id = randomUUID();
     const now = new Date();
     const play: Play = {
       id,
+      userId,
       name: insertPlay.name,
       description: insertPlay.description ?? null,
       sport: insertPlay.sport,
       tags: insertPlay.tags ?? null,
       data: insertPlay.data,
+      shareToken: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -139,9 +83,9 @@ export class MemStorage implements IStorage {
     return play;
   }
 
-  async updatePlay(id: string, updates: Partial<InsertPlay>): Promise<Play | undefined> {
+  async updatePlay(id: string, updates: Partial<InsertPlay>, userId: string): Promise<Play | undefined> {
     const existing = this.plays.get(id);
-    if (!existing) return undefined;
+    if (!existing || existing.userId !== userId) return undefined;
 
     const updated: Play = {
       ...existing,
@@ -152,9 +96,58 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
-  async deletePlay(id: string): Promise<boolean> {
-    return this.plays.delete(id);
+  async deletePlay(id: string, userId: string): Promise<boolean> {
+    const existing = this.plays.get(id);
+    return !!existing && existing.userId === userId && this.plays.delete(id);
   }
 }
 
-export const storage = new MemStorage();
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const db = drizzle(pool, { schema: { plays, users } });
+
+export class DatabaseStorage implements IStorage {
+  async getUser(id: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    return user;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    return user;
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const [created] = await db.insert(users).values(user).returning();
+    return created;
+  }
+
+  async getPlays(userId: string): Promise<Play[]> {
+    return db.select().from(plays).where(eq(plays.userId, userId)).orderBy(desc(plays.updatedAt));
+  }
+
+  async getPlay(id: string, userId: string): Promise<Play | undefined> {
+    const [play] = await db.select().from(plays)
+      .where(and(eq(plays.id, id), eq(plays.userId, userId))).limit(1);
+    return play;
+  }
+
+  async createPlay(play: InsertPlay, userId: string): Promise<Play> {
+    const [created] = await db.insert(plays).values({ ...play, userId }).returning();
+    return created;
+  }
+
+  async updatePlay(id: string, updates: Partial<InsertPlay>, userId: string): Promise<Play | undefined> {
+    const [updated] = await db.update(plays)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(plays.id, id), eq(plays.userId, userId))).returning();
+    return updated;
+  }
+
+  async deletePlay(id: string, userId: string): Promise<boolean> {
+    const deleted = await db.delete(plays)
+      .where(and(eq(plays.id, id), eq(plays.userId, userId))).returning({ id: plays.id });
+    return deleted.length > 0;
+  }
+}
+
+export const storage = new DatabaseStorage();

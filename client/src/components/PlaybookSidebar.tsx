@@ -31,16 +31,19 @@ import {
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { ClientPlay } from "@/lib/playStore";
+import type { PlayTemplate } from "@/lib/playTemplates";
 import type { SportType } from "@shared/schema";
 
 interface PlaybookSidebarProps {
   plays: ClientPlay[];
+  templates: PlayTemplate[];
   currentPlayId: string | null;
   onSelectPlay: (playId: string) => void;
   onCreatePlay: (name: string, sport: SportType) => void;
   onDuplicatePlay: (playId: string) => void;
   onDeletePlay: (playId: string) => void;
   onRenamePlay: (playId: string, name: string) => void;
+  onCopyTemplate: (templateId: string) => void;
 }
 
 const sportEmojis: Record<SportType, string> = {
@@ -65,12 +68,14 @@ const sportLabels: Record<SportType, string> = {
 
 export function PlaybookSidebar({
   plays,
+  templates,
   currentPlayId,
   onSelectPlay,
   onCreatePlay,
   onDuplicatePlay,
   onDeletePlay,
   onRenamePlay,
+  onCopyTemplate,
 }: PlaybookSidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showNewPlayDialog, setShowNewPlayDialog] = useState(false);
@@ -83,6 +88,10 @@ export function PlaybookSidebar({
       play.tags?.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesSearch;
   });
+  const filteredTemplates = templates.filter((template) =>
+    template.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    template.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
   const handleCreatePlay = () => {
     if (newPlayName.trim()) {
@@ -130,6 +139,44 @@ export function PlaybookSidebar({
 
       <ScrollArea className="flex-1">
         <div className="p-2">
+          <section className="mb-5" aria-labelledby="starter-templates-heading">
+            <div className="flex items-center justify-between px-2 py-2">
+              <h3 id="starter-templates-heading" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Starter Templates
+              </h3>
+              <span className="text-xs text-muted-foreground">Read-only</span>
+            </div>
+            {filteredTemplates.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-muted-foreground">No templates match your search.</p>
+            ) : (
+              <div className="space-y-1">
+                {filteredTemplates.map((template) => (
+                  <div key={template.id} className="flex items-center gap-2 rounded-md p-2 hover:bg-sidebar-accent/50">
+                    <span className="text-lg flex-shrink-0">{sportEmojis[template.sport]}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{template.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{template.description}</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 gap-1 px-2"
+                      onClick={() => onCopyTemplate(template.id)}
+                      aria-label={`Copy ${template.name} template`}
+                      data-testid={`copy-template-${template.id}`}
+                    >
+                      <Copy className="h-3 w-3" />
+                      <span className="text-xs">Copy</span>
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+          <div className="mb-2 border-t border-sidebar-border" />
+          <h3 className="px-2 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Your Plays
+          </h3>
           {filteredPlays.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
               <FileText className="h-12 w-12 mb-4 opacity-50" />

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, jsonb, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, jsonb, integer, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -102,17 +102,21 @@ export type PlayData = z.infer<typeof playDataSchema>;
 // Database table for plays
 export const plays = pgTable("plays", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id").notNull(),
   name: text("name").notNull(),
   description: text("description"),
   sport: text("sport").notNull(),
   tags: text("tags").array(),
   data: jsonb("data").notNull(),
+  shareToken: text("share_token").unique(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [index("plays_user_id_idx").on(table.userId)]);
 
 export const insertPlaySchema = createInsertSchema(plays).omit({
   id: true,
+  userId: true,
+  shareToken: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -120,11 +124,16 @@ export const insertPlaySchema = createInsertSchema(plays).omit({
 export type InsertPlay = z.infer<typeof insertPlaySchema>;
 export type Play = typeof plays.$inferSelect;
 
-// Users table (kept for future use)
+// User account and subscription metadata.
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  email: text("email"),
+  stripeCustomerId: text("stripe_customer_id").unique(),
+  subscriptionStatus: text("subscription_status").notNull().default("free"),
+  subscriptionCurrentPeriodEnd: timestamp("subscription_current_period_end"),
+  manualPro: boolean("manual_pro").notNull().default(false),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
