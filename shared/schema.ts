@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, jsonb, integer, timestamp, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, jsonb, integer, timestamp, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -128,13 +128,19 @@ export type Play = typeof plays.$inferSelect;
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+  // Password remains nullable for compatibility with older account rows.
+  // Replit Auth identities are stored by provider subject instead.
+  password: text("password"),
   email: text("email"),
+  authProvider: text("auth_provider"),
+  providerSubject: text("provider_subject"),
   stripeCustomerId: text("stripe_customer_id").unique(),
   subscriptionStatus: text("subscription_status").notNull().default("free"),
   subscriptionCurrentPeriodEnd: timestamp("subscription_current_period_end"),
   manualPro: boolean("manual_pro").notNull().default(false),
-});
+}, (table) => [
+  uniqueIndex("users_auth_provider_subject_unique").on(table.authProvider, table.providerSubject),
+]);
 
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,

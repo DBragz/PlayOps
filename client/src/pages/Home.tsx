@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { 
   Menu, 
   Save, 
-  Download,
-  Settings,
   Zap,
+  LogIn,
+  LogOut,
+  Loader2,
+  UserRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +25,12 @@ import {
   createPlay, 
   duplicatePlay as duplicatePlayFn,
   updatePlayData,
+  fetchCurrentUser,
+  fetchAccountPlays,
+  createAccountPlay,
+  updateAccountPlay,
+  deleteAccountPlay,
+  type AccountUser,
   teamColors,
   type ClientPlay,
 } from "@/lib/playStore";
@@ -39,9 +48,17 @@ import type { PlayData, SportType } from "@shared/schema";
 
 export default function Home() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [plays, setPlays] = useState<ClientPlay[]>([]);
   const [currentPlayId, setCurrentPlayId] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryState | null>(null);
+  const [authStatus, setAuthStatus] = useState<"loading" | "guest" | "account" | "error" | "expired">("loading");
+  const [accountUser, setAccountUser] = useState<AccountUser | null>(null);
+  const [authError, setAuthError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const identityIdRef = useRef<string | null>(null);
+  const identityAbortRef = useRef(new AbortController());
   const [activeTool, setActiveTool] = useState<ToolType>("select");
   const [selectedColor, setSelectedColor] = useState("#FF6B00");
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
@@ -58,22 +75,103 @@ export default function Home() {
   const animationDuration = 3;
 
   useEffect(() => {
-    const loadedPlays = loadPlays();
-    setPlays(loadedPlays);
-    
-    if (loadedPlays.length > 0) {
-      const firstPlay = loadedPlays[0];
-      setCurrentPlayId(firstPlay.id);
-      setPlayName(firstPlay.name);
-      setHistory(createHistoryState(firstPlay.data as PlayData));
-    } else {
-      const newPlay = createPlay("My First Play", "basketball");
-      setPlays([newPlay]);
-      setCurrentPlayId(newPlay.id);
-      setPlayName(newPlay.name);
-      setHistory(createHistoryState(newPlay.data as PlayData));
-      savePlays([newPlay]);
+    const currentUrl = new URL(window.location.href);
+    if (currentUrl.searchParams.get("auth") === "failed") {
+      toast({
+        title: "Sign-in failed",
+        description: "PlayOps couldn't complete sign-in. Please try again.",
+        variant: "destructive",
+      });
+      currentUrl.searchParams.delete("auth");
+      window.history.replaceState({}, "", currentUrl.pathname + currentUrl.search + currentUrl.hash);
     }
+  }, [toast]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    identityAbortRef.current = controller;
+    let active = true;
+
+    const initialize = async () => {
+      try {
+        const user = await fetchCurrentUser(controller.signal);
+        if (!active) return;
+        identityIdRef.current = user?.id ?? null;
+        setAccountUser(user);
+
+        if (user) {
+          const accountPlays = await fetchAccountPlays(controller.signal);
+          if (!active) return;
+          setAuthStatus("account");
+          setPlays(accountPlays);
+          if (accountPlays.length) {
+            const firstPlay = accountPlays[0];
+            setCurrentPlayId(firstPlay.id);
+            setPlayName(firstPlay.name);
+            setHistory(createHistoryState(firstPlay.data as PlayData));
+          } else {
+            setCurrentPlayId(null);
+            setPlayName("Untitled Play");
+            setHistory(createHistoryState(createPlay("Untitled Play").data));
+          }
+          return;
+        }
+
+        const guestPlays = loadPlays();
+        setAuthStatus("guest");
+        setPlays(guestPlays);
+        if (guestPlays.length) {
+          const firstPlay = guestPlays[0];
+          setCurrentPlayId(firstPlay.id);
+          setPlayName(firstPlay.name);
+          setHistory(createHistoryState(firstPlay.data as PlayData));
+        } else {
+          const newPlay = createPlay("My First Play", "basketball");
+          setPlays([newPlay]);
+          setCurrentPlayId(newPlay.id);
+          setPlayName(newPlay.name);
+          setHistory(createHistoryState(newPlay.data as PlayData));
+          savePlays([newPlay]);
+        }
+      } catch (error) {
+        if (!active || controller.signal.aborted) return;
+        console.error("Failed to load PlayOps account data:", error);
+        if (error instanceof Error && /AUTH_SESSION_EXPIRED|401|AUTH_REQUIRED/.test(error.message)) {
+          identityIdRef.current = null;
+          setAccountUser(null);
+          setAuthStatus("expired");
+        } else {
+          setAuthError("PlayOps could not check your sign-in or load your playbook. Please retry.");
+          setAuthStatus("error");
+        }
+      }
+    };
+
+    void initialize();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    const checkForAccountChange = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const user = await fetchCurrentUser();
+        if ((user?.id ?? null) !== identityIdRef.current) {
+          window.location.reload();
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message === "AUTH_SESSION_EXPIRED") {
+          window.location.reload();
+          return;
+        }
+        // Keep the current editor visible; a failed status check is retried on next focus.
+      }
+    };
+    window.addEventListener("focus", checkForAccountChange);
+    return () => window.removeEventListener("focus", checkForAccountChange);
   }, []);
 
   useEffect(() => {
@@ -147,127 +245,257 @@ export default function Home() {
     }
   }, [playData, handlePlayDataChange, toast]);
 
-  const handleSave = useCallback(() => {
-    if (currentPlayId && playData) {
-      const updatedPlays = plays.map((p) =>
-        p.id === currentPlayId
-          ? { ...p, name: playName, data: playData, updatedAt: new Date().toISOString() }
-          : p
-      );
-      setPlays(updatedPlays);
-      savePlays(updatedPlays);
+  const expireAccountSession = useCallback(() => {
+    identityAbortRef.current.abort();
+    identityIdRef.current = null;
+    queryClient.clear();
+    setAccountUser(null);
+    setPlays([]);
+    setCurrentPlayId(null);
+    setHistory(null);
+    setPlayName("");
+    setSelectedElementId(null);
+    setAuthStatus("expired");
+  }, [queryClient]);
+
+  const reportPersistenceError = useCallback((error: unknown, action: string) => {
+    const message = error instanceof Error ? error.message : "";
+    if (authStatus === "account" && /401|AUTH_REQUIRED/.test(message)) {
+      expireAccountSession();
+      toast({
+        title: "Sign-in expired",
+        description: "Sign in again to reopen and save your account plays.",
+        variant: "destructive",
+      });
+      return;
+    }
+    toast({
+      title: `Couldn't ${action}`,
+      description: authStatus === "account"
+        ? "Your account playbook was not changed. Check your connection and try again."
+        : "Your local play was not changed. Check browser storage and try again.",
+      variant: "destructive",
+    });
+  }, [authStatus, expireAccountSession, toast]);
+
+  const persistCurrentPlay = useCallback(async (): Promise<ClientPlay | undefined> => {
+    if (!playData || (authStatus !== "account" && authStatus !== "guest")) return undefined;
+
+    const existing = plays.find((play) => play.id === currentPlayId);
+    const draft = {
+      ...(existing ?? createPlay(playName || "Untitled Play", playData.sport)),
+      name: playName || "Untitled Play",
+      data: playData,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (authStatus === "account") {
+      const userId = accountUser?.id;
+      if (!userId) throw new Error("Your sign-in expired.");
+      const saved = currentPlayId
+        ? await updateAccountPlay(currentPlayId, { name: draft.name, data: draft.data }, identityAbortRef.current.signal)
+        : await createAccountPlay(draft, identityAbortRef.current.signal);
+      if (identityIdRef.current !== userId) throw new DOMException("Account changed", "AbortError");
+      setPlays((current) => current.some((play) => play.id === saved.id)
+        ? current.map((play) => play.id === saved.id ? saved : play)
+        : [...current, saved]);
+      setCurrentPlayId(saved.id);
+      return saved;
+    }
+
+    const updatedPlays = currentPlayId && plays.some((play) => play.id === currentPlayId)
+      ? plays.map((play) => play.id === currentPlayId ? draft : play)
+      : [...plays, draft];
+    setPlays(updatedPlays);
+    savePlays(updatedPlays);
+    setCurrentPlayId(draft.id);
+    return draft;
+  }, [playData, authStatus, plays, currentPlayId, playName, accountUser]);
+
+  const handleSave = useCallback(async () => {
+    if (!playData || isSaving) return;
+    setIsSaving(true);
+    try {
+      const saved = await persistCurrentPlay();
+      if (!saved) return;
       toast({
         title: "Play Saved",
-        description: `"${playName}" has been saved successfully.`,
+        description: `"${saved.name}" has been saved successfully.`,
       });
+    } catch (error) {
+      reportPersistenceError(error, "save play");
+    } finally {
+      setIsSaving(false);
     }
-  }, [currentPlayId, playData, playName, plays, toast]);
+  }, [playData, isSaving, persistCurrentPlay, toast, reportPersistenceError]);
 
-  const handleSelectPlay = useCallback((playId: string) => {
-    if (currentPlayId && playData) {
-      const updatedPlays = plays.map((p) =>
-        p.id === currentPlayId
-          ? { ...p, name: playName, data: playData, updatedAt: new Date().toISOString() }
-          : p
-      );
-      setPlays(updatedPlays);
-      savePlays(updatedPlays);
+  const handleSelectPlay = useCallback(async (playId: string) => {
+    if (playId === currentPlayId) {
+      setSidebarOpen(false);
+      return;
     }
-
-    const play = plays.find((p) => p.id === playId);
-    if (play) {
+    try {
+      await persistCurrentPlay();
+      const play = plays.find((item) => item.id === playId);
+      if (!play) return;
       setCurrentPlayId(playId);
       setPlayName(play.name);
       setHistory(createHistoryState(play.data as PlayData));
       setSelectedElementId(null);
       setSidebarOpen(false);
+    } catch (error) {
+      reportPersistenceError(error, "switch plays");
     }
-  }, [currentPlayId, playData, playName, plays]);
+  }, [currentPlayId, persistCurrentPlay, plays, reportPersistenceError]);
 
-  const handleCreatePlay = useCallback((name: string, sport: SportType) => {
-    const newPlay = createPlay(name, sport);
-    const updatedPlays = [...plays, newPlay];
-    setPlays(updatedPlays);
-    savePlays(updatedPlays);
-    handleSelectPlay(newPlay.id);
-    toast({
-      title: "Play Created",
-      description: `"${name}" has been created.`,
-    });
-  }, [plays, handleSelectPlay, toast]);
+  const selectLoadedPlay = useCallback((play: ClientPlay) => {
+    setCurrentPlayId(play.id);
+    setPlayName(play.name);
+    setHistory(createHistoryState(play.data as PlayData));
+    setSelectedElementId(null);
+    setSidebarOpen(false);
+  }, []);
 
-  const handleDuplicatePlay = useCallback((playId: string) => {
-    const play = plays.find((p) => p.id === playId);
-    if (play) {
-      const duplicated = duplicatePlayFn(play);
-      const updatedPlays = [...plays, duplicated];
+  const handleCreatePlay = useCallback(async (name: string, sport: SportType) => {
+    try {
+      const currentSaved = currentPlayId ? await persistCurrentPlay() : undefined;
+      const basePlays = currentSaved
+        ? plays.map((play) => play.id === currentSaved.id ? currentSaved : play)
+        : plays;
+      const draft = createPlay(name, sport);
+      const created = authStatus === "account"
+        ? await createAccountPlay(draft, identityAbortRef.current.signal)
+        : draft;
+      const updatedPlays = [...basePlays, created];
       setPlays(updatedPlays);
-      savePlays(updatedPlays);
-      toast({
-        title: "Play Duplicated",
-        description: `"${duplicated.name}" has been created.`,
-      });
+      if (authStatus === "guest") savePlays(updatedPlays);
+      selectLoadedPlay(created);
+      toast({ title: "Play Created", description: `"${name}" has been created.` });
+    } catch (error) {
+      reportPersistenceError(error, "create play");
     }
-  }, [plays, toast]);
+  }, [currentPlayId, persistCurrentPlay, plays, authStatus, selectLoadedPlay, toast, reportPersistenceError]);
 
-  const handleCopyTemplate = useCallback((templateId: string) => {
+  const handleDuplicatePlay = useCallback(async (playId: string) => {
+    const play = plays.find((item) => item.id === playId);
+    if (!play) return;
+    try {
+      const source = playId === currentPlayId && playData
+        ? { ...play, name: playName, data: playData }
+        : play;
+      const duplicate = duplicatePlayFn(source);
+      const created = authStatus === "account"
+        ? await createAccountPlay(duplicate, identityAbortRef.current.signal)
+        : duplicate;
+      const updatedPlays = [...plays, created];
+      setPlays(updatedPlays);
+      if (authStatus === "guest") savePlays(updatedPlays);
+      toast({ title: "Play Duplicated", description: `"${created.name}" has been created.` });
+    } catch (error) {
+      reportPersistenceError(error, "duplicate play");
+    }
+  }, [plays, currentPlayId, playData, playName, authStatus, toast, reportPersistenceError]);
+
+  const handleCopyTemplate = useCallback(async (templateId: string) => {
     const template = STARTER_TEMPLATES.find((item) => item.id === templateId);
     if (!template) return;
 
-    const copiedPlay = {
+    const draft = {
       ...createPlay(template.name, template.sport),
       description: template.description,
       tags: [...template.tags],
       data: structuredClone(template.data),
     };
-    const updatedPlays = [...plays, copiedPlay];
-    setPlays(updatedPlays);
-    savePlays(updatedPlays);
-    setCurrentPlayId(copiedPlay.id);
-    setPlayName(copiedPlay.name);
-    setHistory(createHistoryState(copiedPlay.data));
-    setSelectedElementId(null);
-    setSidebarOpen(false);
-    toast({
-      title: "Template Copied",
-      description: `"${template.name}" was copied to your plays.`,
-    });
-  }, [plays, toast]);
+    try {
+      const copiedPlay = authStatus === "account"
+        ? await createAccountPlay(draft, identityAbortRef.current.signal)
+        : draft;
+      const updatedPlays = [...plays, copiedPlay];
+      setPlays(updatedPlays);
+      if (authStatus === "guest") savePlays(updatedPlays);
+      selectLoadedPlay(copiedPlay);
+      toast({ title: "Template Copied", description: `"${template.name}" was copied to your plays.` });
+    } catch (error) {
+      reportPersistenceError(error, "copy template");
+    }
+  }, [plays, authStatus, selectLoadedPlay, toast, reportPersistenceError]);
 
-  const handleDeletePlay = useCallback((playId: string) => {
-    const updatedPlays = plays.filter((p) => p.id !== playId);
-    setPlays(updatedPlays);
-    savePlays(updatedPlays);
-
-    if (currentPlayId === playId) {
-      if (updatedPlays.length > 0) {
-        handleSelectPlay(updatedPlays[0].id);
-      } else {
-        const newPlay = createPlay("Untitled Play", "basketball");
-        setPlays([newPlay]);
-        savePlays([newPlay]);
-        setCurrentPlayId(newPlay.id);
-        setPlayName(newPlay.name);
-        setHistory(createHistoryState(newPlay.data as PlayData));
+  const handleDeletePlay = useCallback(async (playId: string) => {
+    try {
+      if (authStatus === "account") {
+        await deleteAccountPlay(playId, identityAbortRef.current.signal);
       }
-    }
+      const updatedPlays = plays.filter((play) => play.id !== playId);
+      setPlays(updatedPlays);
+      if (authStatus === "guest") savePlays(updatedPlays);
 
-    toast({
-      title: "Play Deleted",
-      description: "The play has been removed from your playbook.",
-    });
-  }, [plays, currentPlayId, handleSelectPlay, toast]);
-
-  const handleRenamePlay = useCallback((playId: string, name: string) => {
-    const updatedPlays = plays.map((p) =>
-      p.id === playId ? { ...p, name } : p
-    );
-    setPlays(updatedPlays);
-    savePlays(updatedPlays);
-    if (playId === currentPlayId) {
-      setPlayName(name);
+      if (currentPlayId === playId) {
+        setSelectedElementId(null);
+        if (updatedPlays.length) {
+          selectLoadedPlay(updatedPlays[0]);
+        } else if (authStatus === "account") {
+          setCurrentPlayId(null);
+          setPlayName("Untitled Play");
+          setHistory(createHistoryState(createPlay("Untitled Play").data));
+        } else {
+          const replacement = createPlay("Untitled Play", "basketball");
+          setPlays([replacement]);
+          savePlays([replacement]);
+          selectLoadedPlay(replacement);
+        }
+      }
+      toast({ title: "Play Deleted", description: "The play has been removed from your playbook." });
+    } catch (error) {
+      reportPersistenceError(error, "delete play");
     }
-  }, [plays, currentPlayId]);
+  }, [authStatus, plays, currentPlayId, selectLoadedPlay, toast, reportPersistenceError]);
+
+  const handleRenamePlay = useCallback(async (playId: string, name: string) => {
+    try {
+      if (authStatus === "account") {
+        const renamed = await updateAccountPlay(
+          playId,
+          { name },
+          identityAbortRef.current.signal,
+        );
+        setPlays((current) => current.map((play) => play.id === playId ? renamed : play));
+      } else {
+        const updatedPlays = plays.map((play) => play.id === playId ? { ...play, name } : play);
+        setPlays(updatedPlays);
+        savePlays(updatedPlays);
+      }
+      if (playId === currentPlayId) setPlayName(name);
+    } catch (error) {
+      reportPersistenceError(error, "rename play");
+    }
+  }, [authStatus, plays, currentPlayId, reportPersistenceError]);
+
+  const handleSignOut = useCallback(async () => {
+    setIsSigningOut(true);
+    try {
+      const response = await fetch("/api/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("Sign-out failed.");
+      identityAbortRef.current.abort();
+      identityIdRef.current = null;
+      queryClient.clear();
+      setAccountUser(null);
+      setPlays([]);
+      setCurrentPlayId(null);
+      setHistory(null);
+      setSelectedElementId(null);
+      window.location.assign("/");
+    } catch {
+      setIsSigningOut(false);
+      toast({
+        title: "Couldn't sign out",
+        description: "Your account is still active. Check your connection and try again.",
+        variant: "destructive",
+      });
+    }
+  }, [queryClient, toast]);
 
   const handleSportChange = useCallback((sport: SportType) => {
     if (playData) {
@@ -322,6 +550,42 @@ export default function Home() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleUndo, handleRedo, handleSave, handlePlayPause]);
+
+  if (authStatus === "loading") {
+    return (
+      <div className="flex items-center justify-center h-screen bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent" />
+          <p className="text-muted-foreground">Loading PlayOps...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus === "error" || authStatus === "expired") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-6">
+        <div className="flex max-w-md flex-col items-center gap-4 text-center">
+          <Zap className="h-9 w-9 text-primary" aria-hidden="true" />
+          <h1 className="text-2xl font-bold">
+            {authStatus === "expired" ? "Your sign-in expired" : "PlayOps couldn't load"}
+          </h1>
+          <p className="text-muted-foreground">
+            {authStatus === "expired"
+              ? "Sign in again to reopen your account playbook. Your guest plays remain separate."
+              : authError}
+          </p>
+          {authStatus === "expired" ? (
+            <Button asChild>
+              <a href="/api/login"><LogIn className="h-4 w-4" /> Sign in again</a>
+            </Button>
+          ) : (
+            <Button onClick={() => window.location.reload()}>Try again</Button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!playData) {
     return (
@@ -389,14 +653,43 @@ export default function Home() {
             variant="outline"
             size="sm"
             onClick={handleSave}
+            disabled={isSaving}
             className="gap-1.5"
             data-testid="button-save"
           >
-            <Save className="h-4 w-4" />
-            <span className="hidden sm:inline">Save</span>
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            <span className="hidden sm:inline">{isSaving ? "Saving…" : "Save"}</span>
           </Button>
 
           <ThemeToggle />
+
+          {authStatus === "account" && accountUser ? (
+            <div className="flex items-center gap-1.5">
+              <span className="max-w-20 truncate text-xs text-muted-foreground lg:max-w-36 lg:text-sm" title={accountUser.email ?? accountUser.name}>
+                <UserRound className="mr-1 inline h-3.5 w-3.5 lg:h-4 lg:w-4" aria-hidden="true" />
+                {accountUser.name}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleSignOut}
+                disabled={isSigningOut}
+                aria-label="Sign out"
+                title="Sign out"
+                data-testid="button-sign-out"
+              >
+                {isSigningOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                <span className="hidden sm:inline">{isSigningOut ? "Signing out…" : "Sign out"}</span>
+              </Button>
+            </div>
+          ) : (
+            <Button asChild variant="outline" size="sm" aria-label="Sign in to save plays" data-testid="button-sign-in">
+              <a href="/api/login">
+                <LogIn className="h-4 w-4" />
+                <span className="text-xs sm:text-sm">Sign in</span>
+              </a>
+            </Button>
+          )}
         </div>
       </header>
 

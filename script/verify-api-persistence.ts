@@ -22,17 +22,22 @@ async function runTestServer(): Promise<void> {
 
   const app = express();
   app.use(express.json());
-  app.use((req: Request, _res: Response, next: NextFunction) => {
-    // Test-only identity injection. Production authentication is not bypassed.
-    const authenticatedRequest = req as TestAuthenticatedRequest;
-    authenticatedRequest.user = { claims: { sub: userId } };
-    authenticatedRequest.isAuthenticated = () => true;
-    next();
-  });
 
   const server = createServer(app);
   const { registerRoutes } = await import("../server/routes");
-  await registerRoutes(server, app);
+  await registerRoutes(server, app, async () => {
+    // Test-only identity injection happens after production middleware and is
+    // never enabled by an HTTP header or in the application entry point.
+    app.use((req: Request, _res: Response, next: NextFunction) => {
+      const authenticatedRequest = req as TestAuthenticatedRequest;
+      authenticatedRequest.user = {
+        claims: { sub: userId, exp: Number.MAX_SAFE_INTEGER },
+        expires_at: Number.MAX_SAFE_INTEGER,
+      };
+      authenticatedRequest.isAuthenticated = () => true;
+      next();
+    });
+  });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
@@ -130,7 +135,7 @@ async function run(): Promise<void> {
 
     const createResponse = await fetch(`${ownerProcess.baseUrl}/api/plays`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Origin: ownerProcess.baseUrl },
       body: JSON.stringify({
         name: "API Persistence Verification",
         sport: "basketball",
@@ -138,8 +143,13 @@ async function run(): Promise<void> {
         data: playData,
       }),
     });
-    assert.equal(createResponse.status, 201, "API should create a play for the authenticated user.");
-    const createdPlay = await createResponse.json() as { id: string; userId: string };
+    const createResponseBody = await createResponse.text();
+    assert.equal(
+      createResponse.status,
+      201,
+      `API should create a play for the authenticated user. Response: ${createResponseBody}`,
+    );
+    const createdPlay = JSON.parse(createResponseBody) as { id: string; userId: string };
     playId = createdPlay.id;
     assert.equal(createdPlay.userId, userId);
 
@@ -156,13 +166,21 @@ async function run(): Promise<void> {
     otherProcess = await startApiProcess(otherUserId);
     const otherUserRead = await fetch(`${otherProcess.baseUrl}/api/plays/${playId}`);
     assert.equal(otherUserRead.status, 404, "Another user must not be able to read the play.");
+    const otherUserUpdate = await fetch(`${otherProcess.baseUrl}/api/plays/${playId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Origin: otherProcess.baseUrl },
+      body: JSON.stringify({ name: "Unauthorized update" }),
+    });
+    assert.equal(otherUserUpdate.status, 404, "Another user must not be able to update the play.");
     const otherUserDelete = await fetch(`${otherProcess.baseUrl}/api/plays/${playId}`, {
       method: "DELETE",
+      headers: { Origin: otherProcess.baseUrl },
     });
     assert.equal(otherUserDelete.status, 404, "Another user must not be able to delete the play.");
 
     const cleanupResponse = await fetch(`${ownerProcess.baseUrl}/api/plays/${playId}`, {
       method: "DELETE",
+      headers: { Origin: ownerProcess.baseUrl },
     });
     assert.equal(cleanupResponse.status, 204, "Test play should be removed after verification.");
 
@@ -174,6 +192,7 @@ async function run(): Promise<void> {
         try {
           await fetch(`${ownerProcess.baseUrl}/api/plays/${playId}`, {
             method: "DELETE",
+            headers: { Origin: ownerProcess.baseUrl },
           });
         } catch {
           // Best-effort cleanup if an earlier assertion failed.

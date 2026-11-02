@@ -5,10 +5,12 @@
   "license": "UNLICENSED",
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server/index.ts",
-    "build": "cross-env NODE_ENV=production vite build",
-    "start": "cross-env NODE_ENV=development vite",
+    "build": "cross-env NODE_ENV=production tsx script/build.ts",
+    "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
+    "db:migrate:auth": "tsx script/migrate-auth-schema.ts",
+    "test:auth": "tsx script/verify-auth.ts",
     "test:api-persistence": "tsx script/verify-api-persistence.ts"
   },
   "dependencies": {
@@ -59,6 +61,7 @@
     "lucide-react": "^0.453.0",
     "memorystore": "^1.6.7",
     "next-themes": "^0.4.6",
+    "openid-client": "^6.8.8",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
     "pg": "^8.16.3",

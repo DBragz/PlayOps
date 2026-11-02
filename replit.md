@@ -45,12 +45,13 @@ Preferred communication style: Simple, everyday language.
 - Production mode serves static files from dist/public
 
 **API Design**: RESTful endpoints under `/api/` prefix
-- CRUD operations for plays: GET/POST/PUT/DELETE `/api/plays`
+- CRUD operations for plays: GET/POST/PATCH/DELETE `/api/plays`
 - JSON request/response format with Zod validation
 
 **Storage Layer**: Interface-based storage abstraction (IStorage)
-- Currently implements in-memory storage (MemStorage)
-- Designed for easy database integration via Drizzle ORM
+- PostgreSQL/Drizzle stores account profiles and owner-scoped plays
+- PostgreSQL-backed Express sessions persist Replit Auth login state
+- Guest plays remain browser-local and are never merged into account data
 
 ### Data Layer
 
@@ -63,6 +64,7 @@ Preferred communication style: Simple, everyday language.
 - Plays contain: players, routes, freehand drawings, text annotations
 - Animation keyframes and view transforms stored in PlayData
 - Tags and sport type for organization and filtering
+- Replit identities are keyed by provider subject; existing subscription fields remain intact
 
 ### Build System
 
@@ -89,8 +91,16 @@ Preferred communication style: Simple, everyday language.
 
 ### Backend Libraries
 - **Express**: Web server framework
+- **openid-client + Passport**: Replit OpenID Connect sign-in and callback verification
+- **express-session + connect-pg-simple**: Persistent server-side sessions
 - **Zod**: Runtime schema validation
 - **drizzle-zod**: Zod schema generation from Drizzle tables
+
+### Authentication Setup
+- Replit supplies `REPL_ID` and `REPLIT_DOMAINS`; `DATABASE_URL` and a 32+ character `SESSION_SECRET` are required.
+- Apply `npm run db:migrate:auth` before using updated account storage. The upgrade is idempotent and preserves existing users, plays, and billing metadata.
+- Callback and mutation origins are validated; account play endpoints use the verified OIDC subject and ignore client-supplied owner IDs.
+- `npm run test:auth` uses a controlled OIDC provider to exercise the callback, session lifecycle, and account isolation.
 
 ### Development Tools
 - **Vite**: Frontend build tool with HMR

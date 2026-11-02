@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import type { PlayData, PlayerObject, Route, FreehandDrawing, TextAnnotation, SportType } from "@shared/schema";
+import { apiRequest } from "./queryClient";
 
 const STORAGE_KEY = "playops-plays";
 
@@ -18,6 +19,74 @@ export interface ClientPlay {
 export interface PlayStore {
   plays: ClientPlay[];
   currentPlayId: string | null;
+}
+
+export interface AccountUser {
+  id: string;
+  name: string;
+  email: string | null;
+  avatarUrl: string | null;
+}
+
+function toClientPlay(play: {
+  id: string;
+  name: string;
+  description: string | null;
+  sport: string;
+  tags: string[] | null;
+  data: PlayData;
+  createdAt: string | Date | null;
+  updatedAt: string | Date | null;
+}): ClientPlay {
+  const now = new Date().toISOString();
+  return {
+    id: play.id,
+    name: play.name,
+    description: play.description,
+    sport: play.sport,
+    tags: play.tags,
+    data: play.data,
+    createdAt: play.createdAt ? new Date(play.createdAt).toISOString() : now,
+    updatedAt: play.updatedAt ? new Date(play.updatedAt).toISOString() : now,
+  };
+}
+
+export async function fetchCurrentUser(signal?: AbortSignal): Promise<AccountUser | null> {
+  const response = await fetch("/api/auth/user", { credentials: "include", signal });
+  if (!response.ok) throw new Error("Could not check your sign-in status.");
+  const result = await response.json() as { user: AccountUser | null; sessionExpired?: boolean };
+  if (result.sessionExpired) throw new Error("AUTH_SESSION_EXPIRED");
+  return result.user;
+}
+
+export async function fetchAccountPlays(signal?: AbortSignal): Promise<ClientPlay[]> {
+  const response = await apiRequest("GET", "/api/plays", undefined, signal);
+  const plays = await response.json() as Parameters<typeof toClientPlay>[0][];
+  return plays.map(toClientPlay);
+}
+
+export async function createAccountPlay(play: ClientPlay, signal?: AbortSignal): Promise<ClientPlay> {
+  const response = await apiRequest("POST", "/api/plays", {
+    name: play.name,
+    description: play.description,
+    sport: play.sport,
+    tags: play.tags,
+    data: play.data,
+  }, signal);
+  return toClientPlay(await response.json() as Parameters<typeof toClientPlay>[0]);
+}
+
+export async function updateAccountPlay(
+  id: string,
+  changes: Partial<Pick<ClientPlay, "name" | "description" | "sport" | "tags" | "data">>,
+  signal?: AbortSignal,
+): Promise<ClientPlay> {
+  const response = await apiRequest("PATCH", `/api/plays/${encodeURIComponent(id)}`, changes, signal);
+  return toClientPlay(await response.json() as Parameters<typeof toClientPlay>[0]);
+}
+
+export async function deleteAccountPlay(id: string, signal?: AbortSignal): Promise<void> {
+  await apiRequest("DELETE", `/api/plays/${encodeURIComponent(id)}`, undefined, signal);
 }
 
 function getDefaultPlayData(sport: SportType = "basketball"): PlayData {

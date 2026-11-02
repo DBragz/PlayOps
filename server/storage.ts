@@ -2,12 +2,13 @@ import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { type User, type InsertUser, type Play, type InsertPlay, plays, users } from "@shared/schema";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  upsertReplitUser(profile: { subject: string; email: string | null }): Promise<User>;
   
   // Plays CRUD operations
   getPlays(userId: string): Promise<Play[]>;
@@ -40,8 +41,39 @@ export class MemStorage implements IStorage {
     const id = randomUUID();
     const user: User = {
       ...insertUser,
+      password: insertUser.password ?? null,
       id,
       email: null,
+      authProvider: null,
+      providerSubject: null,
+      stripeCustomerId: null,
+      subscriptionStatus: "free",
+      subscriptionCurrentPeriodEnd: null,
+      manualPro: false,
+    };
+    this.users.set(id, user);
+    return user;
+  }
+
+  async upsertReplitUser(profile: { subject: string; email: string | null }): Promise<User> {
+    const existing = Array.from(this.users.values()).find(
+      (user) => user.authProvider === "replit" && user.providerSubject === profile.subject,
+    );
+    if (existing) {
+      const updated = { ...existing, email: profile.email };
+      this.users.set(updated.id, updated);
+      return updated;
+    }
+
+    const id = randomUUID();
+    const username = `replit_${createHash("sha256").update(profile.subject).digest("hex")}`;
+    const user: User = {
+      id,
+      username,
+      password: null,
+      email: profile.email,
+      authProvider: "replit",
+      providerSubject: profile.subject,
       stripeCustomerId: null,
       subscriptionStatus: "free",
       subscriptionCurrentPeriodEnd: null,
@@ -119,6 +151,21 @@ export class DatabaseStorage implements IStorage {
   async createUser(user: InsertUser): Promise<User> {
     const [created] = await db.insert(users).values(user).returning();
     return created;
+  }
+
+  async upsertReplitUser(profile: { subject: string; email: string | null }): Promise<User> {
+    const username = `replit_${createHash("sha256").update(profile.subject).digest("hex")}`;
+    const [user] = await db.insert(users).values({
+      username,
+      password: null,
+      email: profile.email,
+      authProvider: "replit",
+      providerSubject: profile.subject,
+    }).onConflictDoUpdate({
+      target: [users.authProvider, users.providerSubject],
+      set: { email: profile.email },
+    }).returning();
+    return user;
   }
 
   async getPlays(userId: string): Promise<Play[]> {

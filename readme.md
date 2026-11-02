@@ -139,6 +139,45 @@ MVP complete with the following features:
 - Animation timeline with playback controls
 - Dark mode toggle with Haikyuu-inspired orange/black theme
 - LocalStorage persistence for plays
+- Optional Replit Auth with private, PostgreSQL-backed playbooks
+
+## Authentication and Playbook Storage
+
+Visitors can use PlayOps without signing in. Guest plays remain in the existing
+`playops-plays` browser storage key and are never copied to an account
+automatically. When signed in, PlayOps loads and saves only that Replit
+account's plays through the authenticated API.
+
+### Replit setup
+
+- Configure Replit Auth from the workspace's **Tools → Users & Auth** panel.
+  Replit provides `REPL_ID` and `REPLIT_DOMAINS`; PlayOps does not need a
+  provider client secret.
+- Set `DATABASE_URL` to the PostgreSQL database and create `SESSION_SECRET`
+  through Replit Secrets. It must contain at least 32 characters.
+- Before starting the updated server, run `npm run db:migrate:auth`. This
+  idempotent upgrade makes the legacy password field nullable and adds provider
+  identity columns and the persistent `sessions` table without deleting user,
+  play, Stripe, or subscription data.
+- Production callback URLs are derived from the request host and accepted only
+  when that host is listed in `REPLIT_DOMAINS`. Add every production/custom
+  domain there. The callback path is `/api/callback`.
+
+Sessions are stored in PostgreSQL for seven days with a rolling expiration.
+Cookies are HTTP-only and SameSite=Lax, and are Secure in production. Provider
+tokens remain server-side; the current-user endpoint returns only an account
+ID, display name, email, and optional avatar URL. Expired sessions require
+sign-in again. A first-time account starts with an empty playbook; existing
+guest plays remain local.
+
+### Authentication checks
+
+Run `npm run check`, `npm run test:auth`, and `npm run test:api-persistence`.
+The authentication test uses a local OIDC provider with signed test tokens and
+checks PKCE, session restart persistence, refresh and expiry, logout, CSRF,
+CRUD, forged identities, and cross-account isolation. `npm run build` creates
+both the production client and backend; `npm start` runs that production
+backend.
 
 ## Features
 
@@ -148,7 +187,7 @@ MVP complete with the following features:
 - **Route Drawing Tools**: Straight lines, curved paths, dashed lines, and arrowheads
 - **Drawing Tools**: Freehand drawing, text annotations, and eraser
 - **Undo/Redo System**: Full history management for all canvas operations
-- **Playbook Library**: Search and filter plays with localStorage persistence
+- **Playbook Library**: Search/filter guest plays in localStorage or private account plays in PostgreSQL
 - **Animation Timeline**: Play/pause/reset controls with adjustable speed and player movement interpolation
 - **Dark Mode**: Toggle between light and dark themes with Haikyuu-inspired orange/black color scheme
 - **Keyboard Shortcuts**: V (select), H (pan), P (player), R (route), D (freehand), T (text), E (eraser)
@@ -193,7 +232,7 @@ playops/
 | Express.js | HTTP server framework |
 | TypeScript | Type-safe JavaScript |
 | Zod | Runtime schema validation |
-| In-Memory Storage | Data persistence (MemStorage class) |
+| PostgreSQL + Drizzle | Persistent users and owner-scoped plays |
 
 ### Shared (shared/)
 
