@@ -192,6 +192,23 @@ async function run(): Promise<void> {
       ["avatarUrl", "email", "id", "name"],
       "Current-user data must not include provider tokens or account credentials.",
     );
+    const accountCheckPool = new Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      const accountRecord = await accountCheckPool.query<{
+        id: string;
+        username: string;
+        email: string | null;
+      }>(
+        "SELECT id, username, email FROM users WHERE auth_provider = 'replit' AND provider_subject = $1",
+        [currentSubject],
+      );
+      assert.equal(accountRecord.rowCount, 1, "Sign-in must upsert one database user.");
+      assert.equal(accountRecord.rows[0].id, currentSubject, "The database user id must match the authenticated subject.");
+      assert.match(accountRecord.rows[0].username, /^coach_auth_test_owner_/);
+      assert.equal(accountRecord.rows[0].email, `${currentSubject}@example.test`);
+    } finally {
+      await accountCheckPool.end();
+    }
 
     const sessionCookieFlags = (await fetch(`${origin}/api/auth/user`, {
       headers: { Cookie: ownerCookie },
@@ -387,7 +404,7 @@ async function signIn(origin: string): Promise<string> {
     redirect: "manual",
   });
   assert.equal(response.status, 302, "The OIDC callback should establish an authenticated session.");
-  assert.equal(response.headers.get("location"), "/");
+  assert.equal(response.headers.get("location"), "/app");
   const establishedCookie = cookieFrom(response, cookie);
   assert.ok(establishedCookie);
   return establishedCookie;

@@ -140,6 +140,9 @@ function profileFromClaims(claims: Record<string, unknown> & { sub: string }) {
   return {
     id: claims.sub,
     name: displayName,
+    username:
+      (typeof claims.username === "string" && claims.username) ||
+      displayName,
     email: typeof claims.email === "string" ? claims.email : null,
     avatarUrl: typeof claims.profile_image_url === "string"
       ? claims.profile_image_url
@@ -242,9 +245,11 @@ export async function setupAuth(app: Express): Promise<void> {
         try {
           const claims = tokens.claims();
           if (!claims?.sub) throw new Error("Replit Auth did not return a user identity.");
+          const profile = profileFromClaims(claims as Record<string, unknown> & { sub: string });
           await storage.upsertReplitUser({
             subject: claims.sub,
             email: typeof claims.email === "string" ? claims.email : null,
+            username: profile.username,
           });
           verified(null, {
             claims: claims as Express.User["claims"],
@@ -292,8 +297,8 @@ export async function setupAuth(app: Express): Promise<void> {
       return;
     }
     passport.authenticate(strategyName, {
-      successRedirect: "/",
-      failureRedirect: "/?auth=failed",
+      successRedirect: "/app",
+      failureRedirect: "/app?auth=failed",
     })(req, res, next);
   });
 
@@ -310,8 +315,14 @@ export async function setupAuth(app: Express): Promise<void> {
           path: "/",
         });
       }
+      const profile = identity ? profileFromClaims(identity.claims) : null;
       res.json({
-        user: identity ? profileFromClaims(identity.claims) : null,
+        user: profile ? {
+          id: profile.id,
+          name: profile.name,
+          email: profile.email,
+          avatarUrl: profile.avatarUrl,
+        } : null,
         sessionExpired: hadAuthenticatedSession && !identity,
       });
     } catch (error) {

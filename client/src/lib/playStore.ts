@@ -3,6 +3,14 @@ import type { PlayData, PlayerObject, Route, FreehandDrawing, TextAnnotation, Sp
 import { apiRequest } from "./queryClient";
 
 const STORAGE_KEY = "playops-plays";
+const LOCAL_IMPORT_KEY_PREFIX = "playops-local-import:";
+const STARTER_SEED_KEY_PREFIX = "playops-templates-seeded:";
+
+export interface LocalPlayImportProgress {
+  importedPlayIds: string[];
+  dismissed: boolean;
+  completed: boolean;
+}
 
 // Client-side Play type that uses string dates for localStorage compatibility
 export interface ClientPlay {
@@ -118,6 +126,47 @@ export function savePlays(plays: ClientPlay[]): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(plays));
   } catch (e) {
     console.error("Failed to save plays to localStorage:", e);
+  }
+}
+
+export function loadLocalPlayImportProgress(userId: string): LocalPlayImportProgress {
+  try {
+    const stored = localStorage.getItem(`${LOCAL_IMPORT_KEY_PREFIX}${userId}`);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Partial<LocalPlayImportProgress>;
+      return {
+        importedPlayIds: Array.isArray(parsed.importedPlayIds) ? parsed.importedPlayIds : [],
+        dismissed: parsed.dismissed === true,
+        completed: parsed.completed === true,
+      };
+    }
+  } catch (e) {
+    console.error("Failed to load local play import progress:", e);
+  }
+  return { importedPlayIds: [], dismissed: false, completed: false };
+}
+
+export function saveLocalPlayImportProgress(userId: string, progress: LocalPlayImportProgress): void {
+  try {
+    localStorage.setItem(`${LOCAL_IMPORT_KEY_PREFIX}${userId}`, JSON.stringify(progress));
+  } catch (e) {
+    console.error("Failed to save local play import progress:", e);
+  }
+}
+
+export function areStarterTemplatesSeeded(userId: string): boolean {
+  try {
+    return localStorage.getItem(`${STARTER_SEED_KEY_PREFIX}${userId}`) === "done";
+  } catch {
+    return false;
+  }
+}
+
+export function markStarterTemplatesSeeded(userId: string): void {
+  try {
+    localStorage.setItem(`${STARTER_SEED_KEY_PREFIX}${userId}`, "done");
+  } catch (e) {
+    console.error("Failed to save starter template import status:", e);
   }
 }
 

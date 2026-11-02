@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   Menu, 
   Save, 
@@ -7,9 +7,10 @@ import {
   LogIn,
   LogOut,
   Loader2,
-  UserRound,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
@@ -30,7 +31,12 @@ import {
   createAccountPlay,
   updateAccountPlay,
   deleteAccountPlay,
+  areStarterTemplatesSeeded,
+  markStarterTemplatesSeeded,
+  loadLocalPlayImportProgress,
+  saveLocalPlayImportProgress,
   type AccountUser,
+  type LocalPlayImportProgress,
   teamColors,
   type ClientPlay,
 } from "@/lib/playStore";
@@ -46,9 +52,24 @@ import {
 } from "@/lib/undoRedo";
 import type { PlayData, SportType } from "@shared/schema";
 
+const accountPlaysQueryKey = (userId: string) => ["/api/plays", userId] as const;
+type AccountPlayChanges = Partial<Pick<ClientPlay, "name" | "description" | "sport" | "tags" | "data">>;
+
 export default function Home() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { mutateAsync: createAccountPlayAsync } = useMutation({
+    mutationFn: ({ play, signal }: { play: ClientPlay; signal?: AbortSignal }) =>
+      createAccountPlay(play, signal),
+  });
+  const { mutateAsync: updateAccountPlayAsync } = useMutation({
+    mutationFn: ({ id, changes, signal }: { id: string; changes: AccountPlayChanges; signal?: AbortSignal }) =>
+      updateAccountPlay(id, changes, signal),
+  });
+  const { mutateAsync: deleteAccountPlayAsync } = useMutation({
+    mutationFn: ({ id, signal }: { id: string; signal?: AbortSignal }) =>
+      deleteAccountPlay(id, signal),
+  });
   const [plays, setPlays] = useState<ClientPlay[]>([]);
   const [currentPlayId, setCurrentPlayId] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryState | null>(null);
@@ -57,6 +78,8 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [showImportPrompt, setShowImportPrompt] = useState(false);
+  const [isImportingLocalPlays, setIsImportingLocalPlays] = useState(false);
   const identityIdRef = useRef<string | null>(null);
   const identityAbortRef = useRef(new AbortController());
   const [activeTool, setActiveTool] = useState<ToolType>("select");
@@ -100,8 +123,35 @@ export default function Home() {
         setAccountUser(user);
 
         if (user) {
-          const accountPlays = await fetchAccountPlays(controller.signal);
+          const playbookKey = accountPlaysQueryKey(user.id);
+          let accountPlays = await queryClient.fetchQuery({
+            queryKey: playbookKey,
+            queryFn: ({ signal }) => fetchAccountPlays(signal),
+            staleTime: Infinity,
+          });
           if (!active) return;
+
+          if (accountPlays.length === 0 && !areStarterTemplatesSeeded(user.id)) {
+            const starterPlays = await Promise.all(STARTER_TEMPLATES.map((template) => {
+              const draft = {
+                ...createPlay(template.name, template.sport),
+                description: template.description,
+                tags: [...template.tags],
+                data: structuredClone(template.data),
+              };
+              return createAccountPlayAsync({ play: draft, signal: controller.signal });
+            }));
+            if (!active) return;
+            markStarterTemplatesSeeded(user.id);
+            accountPlays = starterPlays;
+            queryClient.setQueryData(playbookKey, starterPlays);
+          }
+
+          const localPlays = loadPlays();
+          const importProgress = loadLocalPlayImportProgress(user.id);
+          setShowImportPrompt(
+            localPlays.length > 0 && !importProgress.dismissed && !importProgress.completed,
+          );
           setAuthStatus("account");
           setPlays(accountPlays);
           if (accountPlays.length) {
@@ -152,7 +202,7 @@ export default function Home() {
       active = false;
       controller.abort();
     };
-  }, []);
+  }, [createAccountPlayAsync, queryClient]);
 
   useEffect(() => {
     const checkForAccountChange = async () => {
@@ -293,12 +343,22 @@ export default function Home() {
       const userId = accountUser?.id;
       if (!userId) throw new Error("Your sign-in expired.");
       const saved = currentPlayId
-        ? await updateAccountPlay(currentPlayId, { name: draft.name, data: draft.data }, identityAbortRef.current.signal)
-        : await createAccountPlay(draft, identityAbortRef.current.signal);
+        ? await updateAccountPlayAsync({
+          id: currentPlayId,
+          changes: { name: draft.name, data: draft.data },
+          signal: identityAbortRef.current.signal,
+        })
+        : await createAccountPlayAsync({ play: draft, signal: identityAbortRef.current.signal });
       if (identityIdRef.current !== userId) throw new DOMException("Account changed", "AbortError");
       setPlays((current) => current.some((play) => play.id === saved.id)
         ? current.map((play) => play.id === saved.id ? saved : play)
         : [...current, saved]);
+      queryClient.setQueryData<ClientPlay[]>(accountPlaysQueryKey(userId), (current) => {
+        const cached = current ?? [];
+        return cached.some((play) => play.id === saved.id)
+          ? cached.map((play) => play.id === saved.id ? saved : play)
+          : [...cached, saved];
+      });
       setCurrentPlayId(saved.id);
       return saved;
     }
@@ -310,7 +370,7 @@ export default function Home() {
     savePlays(updatedPlays);
     setCurrentPlayId(draft.id);
     return draft;
-  }, [playData, authStatus, plays, currentPlayId, playName, accountUser]);
+  }, [playData, authStatus, plays, currentPlayId, playName, accountUser, createAccountPlayAsync, updateAccountPlayAsync, queryClient]);
 
   const handleSave = useCallback(async () => {
     if (!playData || isSaving) return;
@@ -364,17 +424,20 @@ export default function Home() {
         : plays;
       const draft = createPlay(name, sport);
       const created = authStatus === "account"
-        ? await createAccountPlay(draft, identityAbortRef.current.signal)
+        ? await createAccountPlayAsync({ play: draft, signal: identityAbortRef.current.signal })
         : draft;
       const updatedPlays = [...basePlays, created];
       setPlays(updatedPlays);
       if (authStatus === "guest") savePlays(updatedPlays);
+      if (authStatus === "account" && accountUser) {
+        queryClient.setQueryData(accountPlaysQueryKey(accountUser.id), updatedPlays);
+      }
       selectLoadedPlay(created);
       toast({ title: "Play Created", description: `"${name}" has been created.` });
     } catch (error) {
       reportPersistenceError(error, "create play");
     }
-  }, [currentPlayId, persistCurrentPlay, plays, authStatus, selectLoadedPlay, toast, reportPersistenceError]);
+  }, [currentPlayId, persistCurrentPlay, plays, authStatus, accountUser, queryClient, createAccountPlayAsync, selectLoadedPlay, toast, reportPersistenceError]);
 
   const handleDuplicatePlay = useCallback(async (playId: string) => {
     const play = plays.find((item) => item.id === playId);
@@ -385,16 +448,19 @@ export default function Home() {
         : play;
       const duplicate = duplicatePlayFn(source);
       const created = authStatus === "account"
-        ? await createAccountPlay(duplicate, identityAbortRef.current.signal)
+        ? await createAccountPlayAsync({ play: duplicate, signal: identityAbortRef.current.signal })
         : duplicate;
       const updatedPlays = [...plays, created];
       setPlays(updatedPlays);
       if (authStatus === "guest") savePlays(updatedPlays);
+      if (authStatus === "account" && accountUser) {
+        queryClient.setQueryData(accountPlaysQueryKey(accountUser.id), updatedPlays);
+      }
       toast({ title: "Play Duplicated", description: `"${created.name}" has been created.` });
     } catch (error) {
       reportPersistenceError(error, "duplicate play");
     }
-  }, [plays, currentPlayId, playData, playName, authStatus, toast, reportPersistenceError]);
+  }, [plays, currentPlayId, playData, playName, authStatus, accountUser, queryClient, createAccountPlayAsync, toast, reportPersistenceError]);
 
   const handleCopyTemplate = useCallback(async (templateId: string) => {
     const template = STARTER_TEMPLATES.find((item) => item.id === templateId);
@@ -408,26 +474,32 @@ export default function Home() {
     };
     try {
       const copiedPlay = authStatus === "account"
-        ? await createAccountPlay(draft, identityAbortRef.current.signal)
+        ? await createAccountPlayAsync({ play: draft, signal: identityAbortRef.current.signal })
         : draft;
       const updatedPlays = [...plays, copiedPlay];
       setPlays(updatedPlays);
       if (authStatus === "guest") savePlays(updatedPlays);
+      if (authStatus === "account" && accountUser) {
+        queryClient.setQueryData(accountPlaysQueryKey(accountUser.id), updatedPlays);
+      }
       selectLoadedPlay(copiedPlay);
       toast({ title: "Template Copied", description: `"${template.name}" was copied to your plays.` });
     } catch (error) {
       reportPersistenceError(error, "copy template");
     }
-  }, [plays, authStatus, selectLoadedPlay, toast, reportPersistenceError]);
+  }, [plays, authStatus, accountUser, queryClient, createAccountPlayAsync, selectLoadedPlay, toast, reportPersistenceError]);
 
   const handleDeletePlay = useCallback(async (playId: string) => {
     try {
       if (authStatus === "account") {
-        await deleteAccountPlay(playId, identityAbortRef.current.signal);
+        await deleteAccountPlayAsync({ id: playId, signal: identityAbortRef.current.signal });
       }
       const updatedPlays = plays.filter((play) => play.id !== playId);
       setPlays(updatedPlays);
       if (authStatus === "guest") savePlays(updatedPlays);
+      if (authStatus === "account" && accountUser) {
+        queryClient.setQueryData(accountPlaysQueryKey(accountUser.id), updatedPlays);
+      }
 
       if (currentPlayId === playId) {
         setSelectedElementId(null);
@@ -448,17 +520,22 @@ export default function Home() {
     } catch (error) {
       reportPersistenceError(error, "delete play");
     }
-  }, [authStatus, plays, currentPlayId, selectLoadedPlay, toast, reportPersistenceError]);
+  }, [authStatus, accountUser, queryClient, deleteAccountPlayAsync, plays, currentPlayId, selectLoadedPlay, toast, reportPersistenceError]);
 
   const handleRenamePlay = useCallback(async (playId: string, name: string) => {
     try {
       if (authStatus === "account") {
-        const renamed = await updateAccountPlay(
-          playId,
-          { name },
-          identityAbortRef.current.signal,
-        );
+        const renamed = await updateAccountPlayAsync({
+          id: playId,
+          changes: { name },
+          signal: identityAbortRef.current.signal,
+        });
         setPlays((current) => current.map((play) => play.id === playId ? renamed : play));
+        if (accountUser) {
+          queryClient.setQueryData<ClientPlay[]>(accountPlaysQueryKey(accountUser.id), (current) =>
+            (current ?? []).map((play) => play.id === playId ? renamed : play),
+          );
+        }
       } else {
         const updatedPlays = plays.map((play) => play.id === playId ? { ...play, name } : play);
         setPlays(updatedPlays);
@@ -468,7 +545,62 @@ export default function Home() {
     } catch (error) {
       reportPersistenceError(error, "rename play");
     }
-  }, [authStatus, plays, currentPlayId, reportPersistenceError]);
+  }, [authStatus, plays, currentPlayId, accountUser, queryClient, updateAccountPlayAsync, reportPersistenceError]);
+
+  const handleImportLocalPlays = useCallback(async () => {
+    if (authStatus !== "account" || !accountUser || isImportingLocalPlays) return;
+    const userId = accountUser.id;
+    const progress = loadLocalPlayImportProgress(userId);
+    const completedIds = new Set(progress.importedPlayIds);
+    setIsImportingLocalPlays(true);
+    let importedCount = 0;
+    try {
+      for (const localPlay of loadPlays()) {
+        if (completedIds.has(localPlay.id)) continue;
+        const imported = await createAccountPlayAsync({
+          play: localPlay,
+          signal: identityAbortRef.current.signal,
+        });
+        if (identityIdRef.current !== userId) throw new DOMException("Account changed", "AbortError");
+        completedIds.add(localPlay.id);
+        const nextProgress: LocalPlayImportProgress = {
+          ...progress,
+          importedPlayIds: Array.from(completedIds),
+        };
+        saveLocalPlayImportProgress(userId, nextProgress);
+        setPlays((current) => current.some((play) => play.id === imported.id)
+          ? current
+          : [...current, imported]);
+        queryClient.setQueryData<ClientPlay[]>(accountPlaysQueryKey(userId), (current) =>
+          current?.some((play) => play.id === imported.id) ? current : [...(current ?? []), imported],
+        );
+        importedCount += 1;
+      }
+      saveLocalPlayImportProgress(userId, {
+        ...progress,
+        importedPlayIds: Array.from(completedIds),
+        completed: true,
+      });
+      setShowImportPrompt(false);
+      toast({
+        title: "Local plays imported",
+        description: importedCount
+          ? `${importedCount} ${importedCount === 1 ? "play was" : "plays were"} added to your account.`
+          : "Your local plays were already imported.",
+      });
+    } catch (error) {
+      reportPersistenceError(error, "import local plays");
+    } finally {
+      setIsImportingLocalPlays(false);
+    }
+  }, [authStatus, accountUser, isImportingLocalPlays, createAccountPlayAsync, queryClient, toast, reportPersistenceError]);
+
+  const handleDismissImportPrompt = useCallback(() => {
+    if (!accountUser) return;
+    const progress = loadLocalPlayImportProgress(accountUser.id);
+    saveLocalPlayImportProgress(accountUser.id, { ...progress, dismissed: true });
+    setShowImportPrompt(false);
+  }, [accountUser]);
 
   const handleSignOut = useCallback(async () => {
     setIsSigningOut(true);
@@ -486,7 +618,7 @@ export default function Home() {
       setCurrentPlayId(null);
       setHistory(null);
       setSelectedElementId(null);
-      window.location.assign("/");
+      window.location.assign("/app");
     } catch {
       setIsSigningOut(false);
       toast({
@@ -663,10 +795,26 @@ export default function Home() {
 
           <ThemeToggle />
 
+          <span
+            className="whitespace-nowrap text-[11px] text-muted-foreground"
+            role="status"
+            aria-live="polite"
+            data-testid="sync-status"
+          >
+            {authStatus === "guest"
+              ? "Saved locally"
+              : authStatus === "account"
+                ? (isSaving || isImportingLocalPlays ? "Syncing…" : "Synced")
+                : ""}
+          </span>
+
           {authStatus === "account" && accountUser ? (
             <div className="flex items-center gap-1.5">
-              <span className="max-w-20 truncate text-xs text-muted-foreground lg:max-w-36 lg:text-sm" title={accountUser.email ?? accountUser.name}>
-                <UserRound className="mr-1 inline h-3.5 w-3.5 lg:h-4 lg:w-4" aria-hidden="true" />
+              <Avatar className="h-7 w-7">
+                <AvatarImage src={accountUser.avatarUrl ?? undefined} alt={`${accountUser.name} avatar`} />
+                <AvatarFallback>{accountUser.name.trim().slice(0, 1).toUpperCase() || "U"}</AvatarFallback>
+              </Avatar>
+              <span className="max-w-24 truncate text-xs text-muted-foreground lg:max-w-36 lg:text-sm" title={accountUser.email ?? accountUser.name}>
                 {accountUser.name}
               </span>
               <Button
@@ -674,24 +822,54 @@ export default function Home() {
                 size="sm"
                 onClick={handleSignOut}
                 disabled={isSigningOut}
-                aria-label="Sign out"
-                title="Sign out"
+                aria-label="Log out"
+                title="Log out"
                 data-testid="button-sign-out"
               >
                 {isSigningOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-                <span className="hidden sm:inline">{isSigningOut ? "Signing out…" : "Sign out"}</span>
+                <span className="hidden sm:inline">{isSigningOut ? "Logging out…" : "Log out"}</span>
               </Button>
             </div>
           ) : (
-            <Button asChild variant="outline" size="sm" aria-label="Sign in to save plays" data-testid="button-sign-in">
+            <Button asChild variant="outline" size="sm" aria-label="Log in to save plays" data-testid="button-sign-in">
               <a href="/api/login">
                 <LogIn className="h-4 w-4" />
-                <span className="text-xs sm:text-sm">Sign in</span>
+                <span className="text-xs sm:text-sm">Log in</span>
               </a>
             </Button>
           )}
         </div>
       </header>
+
+      {showImportPrompt && authStatus === "account" && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/40 px-4 py-2">
+          <p className="text-sm text-muted-foreground">
+            Import the plays saved in this browser to your account?
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleImportLocalPlays}
+              disabled={isImportingLocalPlays}
+              className="gap-1.5"
+              data-testid="button-import-local-plays"
+            >
+              {isImportingLocalPlays
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Upload className="h-4 w-4" />}
+              {isImportingLocalPlays ? "Importing…" : "Import my local plays"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleDismissImportPrompt}
+              disabled={isImportingLocalPlays}
+            >
+              Keep local
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         <div className="absolute left-4 top-1/2 -translate-y-1/2 z-10">

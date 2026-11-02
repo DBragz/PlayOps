@@ -8,7 +8,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
-  upsertReplitUser(profile: { subject: string; email: string | null }): Promise<User>;
+  upsertReplitUser(profile: { subject: string; username: string; email: string | null }): Promise<User>;
   
   // Plays CRUD operations
   getPlays(userId: string): Promise<Play[]>;
@@ -55,18 +55,18 @@ export class MemStorage implements IStorage {
     return user;
   }
 
-  async upsertReplitUser(profile: { subject: string; email: string | null }): Promise<User> {
+  async upsertReplitUser(profile: { subject: string; username: string; email: string | null }): Promise<User> {
     const existing = Array.from(this.users.values()).find(
       (user) => user.authProvider === "replit" && user.providerSubject === profile.subject,
     );
     if (existing) {
-      const updated = { ...existing, email: profile.email };
+      const updated = { ...existing, username: uniqueReplitUsername(profile), email: profile.email };
       this.users.set(updated.id, updated);
       return updated;
     }
 
-    const id = randomUUID();
-    const username = `replit_${createHash("sha256").update(profile.subject).digest("hex")}`;
+    const id = profile.subject;
+    const username = uniqueReplitUsername(profile);
     const user: User = {
       id,
       username,
@@ -153,9 +153,10 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async upsertReplitUser(profile: { subject: string; email: string | null }): Promise<User> {
-    const username = `replit_${createHash("sha256").update(profile.subject).digest("hex")}`;
+  async upsertReplitUser(profile: { subject: string; username: string; email: string | null }): Promise<User> {
+    const username = uniqueReplitUsername(profile);
     const [user] = await db.insert(users).values({
+      id: profile.subject,
       username,
       password: null,
       email: profile.email,
@@ -163,7 +164,7 @@ export class DatabaseStorage implements IStorage {
       providerSubject: profile.subject,
     }).onConflictDoUpdate({
       target: [users.authProvider, users.providerSubject],
-      set: { email: profile.email },
+      set: { id: profile.subject, username, email: profile.email },
     }).returning();
     return user;
   }
@@ -198,3 +199,15 @@ export class DatabaseStorage implements IStorage {
 }
 
 export const storage = new DatabaseStorage();
+
+function uniqueReplitUsername(profile: { subject: string; username: string }): string {
+  const base = profile.username
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40) || "replit_user";
+  const suffix = createHash("sha256").update(profile.subject).digest("hex").slice(0, 10);
+  return `${base}_${suffix}`;
+}
