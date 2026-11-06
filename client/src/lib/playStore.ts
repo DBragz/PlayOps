@@ -36,6 +36,14 @@ export interface AccountUser {
   avatarUrl: string | null;
 }
 
+export type AccountPlan = "free" | "pro";
+
+export interface AccountPlanResponse {
+  user: { id: string; username: string; email: string | null } | null;
+  plan: AccountPlan;
+  sessionExpired?: boolean;
+}
+
 function toClientPlay(play: {
   id: string;
   name: string;
@@ -65,6 +73,17 @@ export async function fetchCurrentUser(signal?: AbortSignal): Promise<AccountUse
   const result = await response.json() as { user: AccountUser | null; sessionExpired?: boolean };
   if (result.sessionExpired) throw new Error("AUTH_SESSION_EXPIRED");
   return result.user;
+}
+
+export async function fetchCurrentPlan(signal?: AbortSignal): Promise<AccountPlanResponse> {
+  const response = await fetch("/api/me", { credentials: "include", signal });
+  if (!response.ok) throw new Error("Could not load your PlayOps plan.");
+  const result = await response.json() as AccountPlanResponse;
+  if (result.sessionExpired) throw new Error("AUTH_SESSION_EXPIRED");
+  if (result.plan !== "free" && result.plan !== "pro") {
+    throw new Error("The server returned an invalid PlayOps plan.");
+  }
+  return result;
 }
 
 export async function fetchAccountPlays(signal?: AbortSignal): Promise<ClientPlay[]> {

@@ -169,7 +169,7 @@ async function clearSession(req: Request): Promise<void> {
   });
 }
 
-async function getValidIdentity(req: Request): Promise<Express.User | undefined> {
+export async function getValidIdentity(req: Request): Promise<Express.User | undefined> {
   if (!req.isAuthenticated?.()) return undefined;
   let identity = req.user as Express.User | undefined;
   if (!identity?.claims?.sub) return undefined;

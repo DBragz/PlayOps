@@ -163,6 +163,13 @@ async function run(): Promise<void> {
     activeServer = apiServer;
     const anonymousPlays = await fetch(`${origin}/api/plays`);
     assert.equal(anonymousPlays.status, 401, "Anonymous users must not read account plays.");
+    const anonymousMeResponse = await fetch(`${origin}/api/me`);
+    assert.equal(anonymousMeResponse.status, 200);
+    assert.deepEqual(
+      await anonymousMeResponse.json(),
+      { user: null, plan: "free", sessionExpired: false },
+      "Anonymous users must receive the server-defined free plan.",
+    );
     const forgedCreate = await fetch(`${origin}/api/plays`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: origin },
@@ -192,6 +199,24 @@ async function run(): Promise<void> {
       ["avatarUrl", "email", "id", "name"],
       "Current-user data must not include provider tokens or account credentials.",
     );
+    const ownerMeResponse = await fetch(`${origin}/api/me`, {
+      headers: { Cookie: ownerCookie },
+    });
+    assert.equal(ownerMeResponse.status, 200);
+    const ownerMeBody = await ownerMeResponse.json() as {
+      user: { id: string; username: string; email: string | null };
+      plan: string;
+      sessionExpired: boolean;
+    };
+    assert.equal(ownerMeBody.user.id, currentSubject);
+    assert.equal(ownerMeBody.user.email, `${currentSubject}@example.test`);
+    assert.equal(ownerMeBody.plan, "free");
+    assert.equal(ownerMeBody.sessionExpired, false);
+    assert.deepEqual(
+      Object.keys(ownerMeBody.user).sort(),
+      ["email", "id", "username"],
+      "The plan endpoint must not expose billing identifiers or credentials.",
+    );
     const accountCheckPool = new Pool({ connectionString: process.env.DATABASE_URL });
     try {
       const accountRecord = await accountCheckPool.query<{
@@ -206,6 +231,34 @@ async function run(): Promise<void> {
       assert.equal(accountRecord.rows[0].id, currentSubject, "The database user id must match the authenticated subject.");
       assert.match(accountRecord.rows[0].username, /^coach_auth_test_owner_/);
       assert.equal(accountRecord.rows[0].email, `${currentSubject}@example.test`);
+
+      await accountCheckPool.query("UPDATE users SET manual_pro = TRUE WHERE id = $1", [currentSubject]);
+      const manualProResponse = await fetch(`${origin}/api/me`, {
+        headers: { Cookie: ownerCookie },
+      });
+      assert.equal((await manualProResponse.json() as { plan: string }).plan, "pro");
+
+      await accountCheckPool.query(
+        "UPDATE users SET manual_pro = FALSE, subscription_status = 'active', subscription_current_period_end = NOW() + INTERVAL '1 day' WHERE id = $1",
+        [currentSubject],
+      );
+      const activeProResponse = await fetch(`${origin}/api/me`, {
+        headers: { Cookie: ownerCookie },
+      });
+      assert.equal((await activeProResponse.json() as { plan: string }).plan, "pro");
+
+      await accountCheckPool.query(
+        "UPDATE users SET subscription_current_period_end = NOW() - INTERVAL '1 day' WHERE id = $1",
+        [currentSubject],
+      );
+      const expiredProResponse = await fetch(`${origin}/api/me`, {
+        headers: { Cookie: ownerCookie },
+      });
+      assert.equal((await expiredProResponse.json() as { plan: string }).plan, "free");
+      await accountCheckPool.query(
+        "UPDATE users SET subscription_status = 'free', subscription_current_period_end = NULL WHERE id = $1",
+        [currentSubject],
+      );
     } finally {
       await accountCheckPool.end();
     }

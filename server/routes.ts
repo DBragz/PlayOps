@@ -2,7 +2,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertPlaySchema } from "@shared/schema";
 import type { Express, Request, RequestHandler } from "express";
-import { requireAuthenticated, requireSameOrigin, setupAuth } from "./auth";
+import { getValidIdentity, requireAuthenticated, requireSameOrigin, setupAuth } from "./auth";
 
 function authenticatedUserId(req: Request): string | undefined {
   return req.user?.claims?.sub;
@@ -11,6 +11,14 @@ function authenticatedUserId(req: Request): string | undefined {
 const requireSameOriginMutation: RequestHandler = (req, res, next) => {
   if (requireSameOrigin(req, res)) next();
 };
+
+function planForUser(user: Awaited<ReturnType<typeof storage.getUser>>): "free" | "pro" {
+  if (!user) return "free";
+  if (user.manualPro) return "pro";
+  if (!["active", "trialing"].includes(user.subscriptionStatus)) return "free";
+  const periodEnd = user.subscriptionCurrentPeriodEnd?.getTime();
+  return periodEnd === undefined || periodEnd > Date.now() ? "pro" : "free";
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -21,6 +29,32 @@ export async function registerRoutes(
   app.use("/api", (_req, res, next) => {
     res.setHeader("Cache-Control", "private, no-store");
     next();
+  });
+
+  app.get("/api/me", async (req, res, next) => {
+    const hadAuthenticatedSession = req.isAuthenticated?.() === true;
+    try {
+      const identity = await getValidIdentity(req);
+      if (!identity) {
+        return res.json({
+          user: null,
+          plan: "free",
+          sessionExpired: hadAuthenticatedSession,
+        });
+      }
+
+      const user = await storage.getUser(identity.claims.sub);
+      if (!user) {
+        return res.status(500).json({ error: "Authenticated account was not found." });
+      }
+      res.json({
+        user: { id: user.id, username: user.username, email: user.email },
+        plan: planForUser(user),
+        sessionExpired: false,
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.get("/api/plays", requireAuthenticated, async (req, res) => {

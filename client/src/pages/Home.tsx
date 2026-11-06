@@ -8,14 +8,24 @@ import {
   LogOut,
   Loader2,
   Upload,
+  Download,
+  Printer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { DrawingCanvas } from "@/components/DrawingCanvas";
+import { DrawingCanvas, type DrawingCanvasHandle } from "@/components/DrawingCanvas";
 import { ToolPalette, type ToolType, type RouteOptions } from "@/components/ToolPalette";
 import { AnimationControls } from "@/components/AnimationControls";
 import { PlaybookSidebar } from "@/components/PlaybookSidebar";
@@ -27,6 +37,7 @@ import {
   duplicatePlay as duplicatePlayFn,
   updatePlayData,
   fetchCurrentUser,
+  fetchCurrentPlan,
   fetchAccountPlays,
   createAccountPlay,
   updateAccountPlay,
@@ -36,10 +47,12 @@ import {
   loadLocalPlayImportProgress,
   saveLocalPlayImportProgress,
   type AccountUser,
+  type AccountPlan,
   type LocalPlayImportProgress,
   teamColors,
   type ClientPlay,
 } from "@/lib/playStore";
+import { addPlayOpsWatermark, downloadPlayPng, writePlayPrintView } from "@/lib/playExport";
 import { STARTER_TEMPLATES } from "@/lib/playTemplates";
 import { 
   createHistoryState, 
@@ -75,13 +88,16 @@ export default function Home() {
   const [history, setHistory] = useState<HistoryState | null>(null);
   const [authStatus, setAuthStatus] = useState<"loading" | "guest" | "account" | "error" | "expired">("loading");
   const [accountUser, setAccountUser] = useState<AccountUser | null>(null);
+  const [userPlan, setUserPlan] = useState<AccountPlan>("free");
   const [authError, setAuthError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showImportPrompt, setShowImportPrompt] = useState(false);
+  const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
   const [isImportingLocalPlays, setIsImportingLocalPlays] = useState(false);
   const identityIdRef = useRef<string | null>(null);
   const identityAbortRef = useRef(new AbortController());
+  const drawingCanvasRef = useRef<DrawingCanvasHandle>(null);
   const [activeTool, setActiveTool] = useState<ToolType>("select");
   const [selectedColor, setSelectedColor] = useState("#FF6B00");
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
@@ -117,10 +133,17 @@ export default function Home() {
 
     const initialize = async () => {
       try {
-        const user = await fetchCurrentUser(controller.signal);
+        const [user, planInfo] = await Promise.all([
+          fetchCurrentUser(controller.signal),
+          fetchCurrentPlan(controller.signal),
+        ]);
         if (!active) return;
+        if ((user?.id ?? null) !== (planInfo.user?.id ?? null)) {
+          throw new Error("Your sign-in changed while loading your account.");
+        }
         identityIdRef.current = user?.id ?? null;
         setAccountUser(user);
+        setUserPlan(planInfo.plan);
 
         if (user) {
           const playbookKey = accountPlaysQueryKey(user.id);
@@ -208,10 +231,16 @@ export default function Home() {
     const checkForAccountChange = async () => {
       if (document.visibilityState !== "visible") return;
       try {
-        const user = await fetchCurrentUser();
+        const [user, planInfo] = await Promise.all([fetchCurrentUser(), fetchCurrentPlan()]);
+        if ((user?.id ?? null) !== (planInfo.user?.id ?? null)) {
+          window.location.reload();
+          return;
+        }
         if ((user?.id ?? null) !== identityIdRef.current) {
           window.location.reload();
+          return;
         }
+        setUserPlan(planInfo.plan);
       } catch (error) {
         if (error instanceof Error && error.message === "AUTH_SESSION_EXPIRED") {
           window.location.reload();
@@ -388,6 +417,96 @@ export default function Home() {
       setIsSaving(false);
     }
   }, [playData, isSaving, persistCurrentPlay, toast, reportPersistenceError]);
+
+  const handleDownloadPng = useCallback(async () => {
+    const stage = drawingCanvasRef.current?.getStage();
+    if (!stage) {
+      toast({
+        title: "Couldn't export PNG",
+        description: "The play canvas is not ready yet. Try again in a moment.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const diagramDataUrl = stage.toDataURL({ pixelRatio: 2 });
+      const planInfo = await fetchCurrentPlan();
+      if ((planInfo.user?.id ?? null) !== identityIdRef.current) {
+        window.location.reload();
+        return;
+      }
+      setUserPlan(planInfo.plan);
+      let png = diagramDataUrl;
+      if (planInfo.plan === "free") png = await addPlayOpsWatermark(png);
+      downloadPlayPng(png, playName);
+      toast({
+        title: "PNG downloaded",
+        description: planInfo.plan === "free"
+          ? "Your free export includes a Made with PlayOps watermark."
+          : "Your play was exported at 2× resolution.",
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === "AUTH_SESSION_EXPIRED") {
+        expireAccountSession();
+      }
+      toast({
+        title: "Couldn't export PNG",
+        description: "PlayOps couldn't verify your plan or render this image. Try again.",
+        variant: "destructive",
+      });
+    }
+  }, [playName, toast, expireAccountSession]);
+
+  const handlePrint = useCallback(async () => {
+    if (userPlan === "free") {
+      setShowUpgradePrompt(true);
+      return;
+    }
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      toast({
+        title: "Print view was blocked",
+        description: "Allow pop-ups for PlayOps, then try Print again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.title = "Preparing PlayOps print view";
+    printWindow.document.body.textContent = "Checking your plan…";
+
+    try {
+      const stage = drawingCanvasRef.current?.getStage();
+      if (!stage) throw new Error("The play canvas is not ready.");
+      const diagramDataUrl = stage.toDataURL({ pixelRatio: 2 });
+      const planInfo = await fetchCurrentPlan();
+      if ((planInfo.user?.id ?? null) !== identityIdRef.current) {
+        printWindow.close();
+        window.location.reload();
+        return;
+      }
+      setUserPlan(planInfo.plan);
+      if (planInfo.plan !== "pro") {
+        printWindow.close();
+        setShowUpgradePrompt(true);
+        return;
+      }
+
+      await writePlayPrintView(printWindow, playName, diagramDataUrl);
+    } catch (error) {
+      printWindow.close();
+      if (error instanceof Error && error.message === "AUTH_SESSION_EXPIRED") {
+        expireAccountSession();
+      }
+      toast({
+        title: "Couldn't prepare print view",
+        description: "PlayOps couldn't verify your plan or render this play. Try again.",
+        variant: "destructive",
+      });
+    }
+  }, [userPlan, toast, playName, expireAccountSession]);
 
   const handleSelectPlay = useCallback(async (playId: string) => {
     if (playId === currentPlayId) {
@@ -784,6 +903,32 @@ export default function Home() {
           <Button
             variant="outline"
             size="sm"
+            onClick={handleDownloadPng}
+            title="Download PNG"
+            aria-label="Download PNG"
+            data-testid="button-download-png"
+            className="gap-1.5"
+          >
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">PNG</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePrint}
+            title="Print"
+            aria-label="Print"
+            data-testid="button-print"
+            className="gap-1.5"
+          >
+            <Printer className="h-4 w-4" />
+            <span className="hidden sm:inline">Print</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleSave}
             disabled={isSaving}
             className="gap-1.5"
@@ -841,6 +986,25 @@ export default function Home() {
         </div>
       </header>
 
+      <Dialog open={showUpgradePrompt} onOpenChange={setShowUpgradePrompt}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Printing is a Pro feature</DialogTitle>
+            <DialogDescription>
+              Upgrade to PlayOps Pro to print this play or save it as a PDF.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowUpgradePrompt(false)}>
+              Not now
+            </Button>
+            <Button asChild>
+              <a href="/pricing">View plans</a>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {showImportPrompt && authStatus === "account" && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/40 px-4 py-2">
           <p className="text-sm text-muted-foreground">
@@ -891,6 +1055,7 @@ export default function Home() {
 
         <main className="flex-1 relative">
           <DrawingCanvas
+            ref={drawingCanvasRef}
             playData={playData}
             activeTool={activeTool}
             selectedColor={selectedColor}

@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState, useEffect, useCallback } from "react";
 import { Stage, Layer, Line, Text as KonvaText, Group } from "react-konva";
 import Konva from "konva";
 import type { PlayData, PlayerObject, Route, FreehandDrawing, TextAnnotation, SportType } from "@shared/schema";
@@ -22,10 +22,14 @@ interface DrawingCanvasProps {
   isAnimating: boolean;
 }
 
+export interface DrawingCanvasHandle {
+  getStage: () => Konva.Stage | null;
+}
+
 const CANVAS_WIDTH = 1200;
 const CANVAS_HEIGHT = 800;
 
-export function DrawingCanvas({
+export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(function DrawingCanvas({
   playData,
   activeTool,
   selectedColor,
@@ -35,11 +39,15 @@ export function DrawingCanvas({
   onSelectElement,
   animationProgress,
   isAnimating,
-}: DrawingCanvasProps) {
+}, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const { theme } = useTheme();
   const isDark = theme === "dark";
+
+  useImperativeHandle(ref, () => ({
+    getStage: () => stageRef.current,
+  }), []);
 
   const [dimensions, setDimensions] = useState({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT });
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
@@ -619,4 +627,4 @@ export function DrawingCanvas({
       </div>
     </div>
   );
-}
+});
