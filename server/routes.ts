@@ -57,6 +57,26 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/share/:token", async (req, res) => {
+    try {
+      const play = await storage.getPlayByShareToken(String(req.params.token));
+      if (!play) return res.status(404).json({ error: "This play is no longer shared." });
+      res.json({
+        id: play.id,
+        name: play.name,
+        description: play.description,
+        sport: play.sport,
+        tags: play.tags,
+        data: play.data,
+        createdAt: play.createdAt,
+        updatedAt: play.updatedAt,
+      });
+    } catch (error) {
+      console.error("Error fetching shared play:", error);
+      res.status(500).json({ error: "Failed to fetch shared play." });
+    }
+  });
+
   app.get("/api/plays", requireAuthenticated, async (req, res) => {
     try {
       const userId = authenticatedUserId(req);
@@ -136,6 +156,38 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error deleting play:", error);
       res.status(500).json({ error: "Failed to delete play" });
+    }
+  });
+
+  app.post("/api/plays/:id/share", requireAuthenticated, requireSameOriginMutation, async (req, res) => {
+    try {
+      const userId = authenticatedUserId(req);
+      if (!userId) return res.status(401).json({ error: "Authentication required", code: "AUTH_REQUIRED" });
+      const user = await storage.getUser(userId);
+      if (!user || planForUser(user) !== "pro") {
+        return res.status(403).json({ error: "Play sharing requires PlayOps Pro.", code: "PRO_REQUIRED" });
+      }
+
+      const play = await storage.createPlayShareToken(String(req.params.id), userId);
+      if (!play) return res.status(404).json({ error: "Play not found." });
+      if (!play.shareToken) return res.status(500).json({ error: "Could not create a share link." });
+      res.json({ shareToken: play.shareToken });
+    } catch (error) {
+      console.error("Error sharing play:", error);
+      res.status(500).json({ error: "Failed to share play." });
+    }
+  });
+
+  app.delete("/api/plays/:id/share", requireAuthenticated, requireSameOriginMutation, async (req, res) => {
+    try {
+      const userId = authenticatedUserId(req);
+      if (!userId) return res.status(401).json({ error: "Authentication required", code: "AUTH_REQUIRED" });
+      const play = await storage.clearPlayShareToken(String(req.params.id), userId);
+      if (!play) return res.status(404).json({ error: "Play not found." });
+      res.status(204).end();
+    } catch (error) {
+      console.error("Error stopping play share:", error);
+      res.status(500).json({ error: "Failed to stop sharing play." });
     }
   });
 

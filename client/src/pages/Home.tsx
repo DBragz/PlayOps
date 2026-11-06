@@ -10,6 +10,9 @@ import {
   Upload,
   Download,
   Printer,
+  Share2,
+  Copy,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -42,6 +45,9 @@ import {
   createAccountPlay,
   updateAccountPlay,
   deleteAccountPlay,
+  createAccountPlayShareToken,
+  stopAccountPlaySharing,
+  copyShareLink,
   areStarterTemplatesSeeded,
   markStarterTemplatesSeeded,
   loadLocalPlayImportProgress,
@@ -94,6 +100,9 @@ export default function Home() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showImportPrompt, setShowImportPrompt] = useState(false);
   const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
+  const [upgradePromptFeature, setUpgradePromptFeature] = useState<"printing" | "sharing">("printing");
+  const [isSharing, setIsSharing] = useState(false);
+  const [isStoppingShare, setIsStoppingShare] = useState(false);
   const [isImportingLocalPlays, setIsImportingLocalPlays] = useState(false);
   const identityIdRef = useRef<string | null>(null);
   const identityAbortRef = useRef(new AbortController());
@@ -460,6 +469,7 @@ export default function Home() {
 
   const handlePrint = useCallback(async () => {
     if (userPlan === "free") {
+      setUpgradePromptFeature("printing");
       setShowUpgradePrompt(true);
       return;
     }
@@ -490,6 +500,7 @@ export default function Home() {
       setUserPlan(planInfo.plan);
       if (planInfo.plan !== "pro") {
         printWindow.close();
+        setUpgradePromptFeature("printing");
         setShowUpgradePrompt(true);
         return;
       }
@@ -507,6 +518,87 @@ export default function Home() {
       });
     }
   }, [userPlan, toast, playName, expireAccountSession]);
+
+  const handleShare = useCallback(async () => {
+    if (userPlan !== "pro") {
+      setUpgradePromptFeature("sharing");
+      setShowUpgradePrompt(true);
+      return;
+    }
+    if (authStatus !== "account" || !accountUser) {
+      toast({
+        title: "Sign in to share plays",
+        description: "Log in to create a PlayOps share link.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSharing(true);
+    try {
+      const saved = await persistCurrentPlay();
+      if (!saved) return;
+      const shareToken = saved.shareToken
+        ?? await createAccountPlayShareToken(saved.id, identityAbortRef.current.signal);
+      const sharedPlay = { ...saved, shareToken };
+      setPlays((current) => current.some((play) => play.id === saved.id)
+        ? current.map((play) => play.id === saved.id ? sharedPlay : play)
+        : [...current, sharedPlay]);
+      queryClient.setQueryData<ClientPlay[]>(accountPlaysQueryKey(accountUser.id), (current) => {
+        const cached = current ?? [];
+        return cached.some((play) => play.id === saved.id)
+          ? cached.map((play) => play.id === saved.id ? sharedPlay : play)
+          : [...cached, sharedPlay];
+      });
+
+      const shareUrl = `${window.location.origin}/share/${encodeURIComponent(shareToken)}`;
+      try {
+        await copyShareLink(shareUrl);
+        toast({ title: "Share link copied", description: "Anyone with the link can view this play." });
+      } catch {
+        toast({
+          title: "Share link created",
+          description: `Copy this link to share: ${shareUrl}`,
+        });
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("PRO_REQUIRED")) {
+        setUpgradePromptFeature("sharing");
+        setShowUpgradePrompt(true);
+      } else {
+        reportPersistenceError(error, "share play");
+      }
+    } finally {
+      setIsSharing(false);
+    }
+  }, [
+    userPlan,
+    authStatus,
+    accountUser,
+    persistCurrentPlay,
+    createAccountPlayShareToken,
+    queryClient,
+    toast,
+    reportPersistenceError,
+  ]);
+
+  const handleStopSharing = useCallback(async () => {
+    if (authStatus !== "account" || !accountUser || !currentPlay?.shareToken) return;
+    setIsStoppingShare(true);
+    try {
+      await stopAccountPlaySharing(currentPlay.id, identityAbortRef.current.signal);
+      const unsharedPlay = { ...currentPlay, shareToken: null };
+      setPlays((current) => current.map((play) => play.id === currentPlay.id ? unsharedPlay : play));
+      queryClient.setQueryData<ClientPlay[]>(accountPlaysQueryKey(accountUser.id), (current) =>
+        (current ?? []).map((play) => play.id === currentPlay.id ? unsharedPlay : play),
+      );
+      toast({ title: "Sharing stopped", description: "The old link no longer works." });
+    } catch (error) {
+      reportPersistenceError(error, "stop sharing");
+    } finally {
+      setIsStoppingShare(false);
+    }
+  }, [authStatus, accountUser, currentPlay, queryClient, toast, reportPersistenceError]);
 
   const handleSelectPlay = useCallback(async (playId: string) => {
     if (playId === currentPlayId) {
@@ -929,6 +1021,38 @@ export default function Home() {
           <Button
             variant="outline"
             size="sm"
+            onClick={handleShare}
+            disabled={isSharing}
+            title={currentPlay?.shareToken ? "Copy share link" : "Share play"}
+            aria-label={currentPlay?.shareToken ? "Copy share link" : "Share play"}
+            data-testid="button-share-play"
+            className="gap-1.5"
+          >
+            {isSharing ? <Loader2 className="h-4 w-4 animate-spin" /> : currentPlay?.shareToken ? <Copy className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
+            <span className="hidden lg:inline">
+              {isSharing ? "Sharing…" : currentPlay?.shareToken ? "Copy link" : "Share"}
+            </span>
+          </Button>
+
+          {authStatus === "account" && currentPlay?.shareToken && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleStopSharing}
+              disabled={isStoppingShare}
+              title="Stop sharing"
+              aria-label="Stop sharing"
+              data-testid="button-stop-sharing"
+              className="gap-1.5"
+            >
+              {isStoppingShare ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+              <span className="hidden lg:inline">Stop sharing</span>
+            </Button>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleSave}
             disabled={isSaving}
             className="gap-1.5"
@@ -989,9 +1113,13 @@ export default function Home() {
       <Dialog open={showUpgradePrompt} onOpenChange={setShowUpgradePrompt}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Printing is a Pro feature</DialogTitle>
+            <DialogTitle>
+              {upgradePromptFeature === "sharing" ? "Sharing is a Pro feature" : "Printing is a Pro feature"}
+            </DialogTitle>
             <DialogDescription>
-              Upgrade to PlayOps Pro to print this play or save it as a PDF.
+              {upgradePromptFeature === "sharing"
+                ? "Upgrade to PlayOps Pro to create and copy public play links."
+                : "Upgrade to PlayOps Pro to print this play or save it as a PDF."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

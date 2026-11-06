@@ -7,10 +7,12 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Pricing from "@/pages/Pricing";
+import SharedPlay from "@/pages/SharedPlay";
 
 function Router() {
   return (
     <Switch>
+      <Route path="/share/:token" component={SharedPlay} />
       <Route path="/" component={() => <Redirect to="/app" replace />} />
       <Route path="/app" component={Home} />
       <Route path="/pricing" component={Pricing} />

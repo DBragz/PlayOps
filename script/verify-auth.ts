@@ -170,6 +170,8 @@ async function run(): Promise<void> {
       { user: null, plan: "free", sessionExpired: false },
       "Anonymous users must receive the server-defined free plan.",
     );
+    const anonymousSharedPlay = await fetch(`${origin}/api/share/not-a-real-token`);
+    assert.equal(anonymousSharedPlay.status, 404, "An invalid public share token must not return a play.");
     const forgedCreate = await fetch(`${origin}/api/plays`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: origin },
@@ -284,6 +286,52 @@ async function run(): Promise<void> {
     const created = await createdResponse.json() as { id: string; userId: string; name: string };
     assert.equal(created.userId, currentSubject, "The owner must come from the verified provider subject.");
 
+    const freeShareResponse = await fetch(`${origin}/api/plays/${created.id}/share`, {
+      method: "POST",
+      headers: { Cookie: ownerCookie, Origin: origin },
+    });
+    assert.equal(freeShareResponse.status, 403, "Free users must not create public share links.");
+    assert.equal(
+      (await freeShareResponse.json() as { code: string }).code,
+      "PRO_REQUIRED",
+    );
+
+    const sharePlanPool = new Pool({ connectionString: process.env.DATABASE_URL });
+    let shareToken = "";
+    try {
+      await sharePlanPool.query("UPDATE users SET manual_pro = TRUE WHERE id = $1", [currentSubject]);
+      const shareResponse = await fetch(`${origin}/api/plays/${created.id}/share`, {
+        method: "POST",
+        headers: { Cookie: ownerCookie, Origin: origin },
+      });
+      assert.equal(shareResponse.status, 200);
+      shareToken = (await shareResponse.json() as { shareToken: string }).shareToken;
+      assert.match(shareToken, /^[A-Za-z0-9_-]{40,}$/);
+
+      const repeatedShareResponse = await fetch(`${origin}/api/plays/${created.id}/share`, {
+        method: "POST",
+        headers: { Cookie: ownerCookie, Origin: origin },
+      });
+      assert.equal(
+        (await repeatedShareResponse.json() as { shareToken: string }).shareToken,
+        shareToken,
+        "Repeated share requests should keep the existing public token.",
+      );
+    } finally {
+      await sharePlanPool.end();
+    }
+
+    const publicShareResponse = await fetch(`${origin}/api/share/${shareToken}`);
+    assert.equal(publicShareResponse.status, 200, "A valid share link must work without login.");
+    const publicShare = await publicShareResponse.json() as Record<string, unknown>;
+    assert.equal(publicShare.id, created.id);
+    assert.equal(publicShare.name, "Private play");
+    assert.deepEqual(
+      Object.keys(publicShare).sort(),
+      ["createdAt", "data", "description", "id", "name", "sport", "tags", "updatedAt"],
+      "The public response must omit owner identifiers and share-management data.",
+    );
+
     const wrongOriginUpdate = await fetch(`${origin}/api/plays/${created.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Cookie: ownerCookie, Origin: "https://attacker.invalid" },
@@ -308,6 +356,11 @@ async function run(): Promise<void> {
     });
     assert.equal(persistedPlay.status, 200);
     assert.equal((await persistedPlay.json() as { name: string }).name, "Private play");
+    assert.equal(
+      (await (await fetch(`${otherSession.origin}/api/share/${shareToken}`)).json() as { id: string }).id,
+      created.id,
+      "Public share links must survive an API server restart.",
+    );
 
     const renamedResponse = await fetch(`${otherSession.origin}/api/plays/${created.id}`, {
       method: "PATCH",
@@ -322,6 +375,12 @@ async function run(): Promise<void> {
     currentExpirySeconds = 3600;
     currentProvidesRefreshToken = false;
     const otherCookie = await signIn(otherSession.origin);
+    const otherPlanPool = new Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      await otherPlanPool.query("UPDATE users SET manual_pro = TRUE WHERE id = $1", [currentSubject]);
+    } finally {
+      await otherPlanPool.end();
+    }
     const otherRead = await fetch(`${otherSession.origin}/api/plays/${created.id}`, {
       headers: { Cookie: otherCookie },
     });
@@ -337,6 +396,29 @@ async function run(): Promise<void> {
       headers: { Cookie: otherCookie, Origin: otherSession.origin },
     });
     assert.equal(otherDelete.status, 404, "Another account must not delete the owner's play.");
+    const otherShareAttempt = await fetch(`${otherSession.origin}/api/plays/${created.id}/share`, {
+      method: "POST",
+      headers: { Cookie: otherCookie, Origin: otherSession.origin },
+    });
+    assert.equal(otherShareAttempt.status, 404, "Another Pro account must not share an owner's play.");
+    const otherStopShareAttempt = await fetch(`${otherSession.origin}/api/plays/${created.id}/share`, {
+      method: "DELETE",
+      headers: { Cookie: otherCookie, Origin: otherSession.origin },
+    });
+    assert.equal(otherStopShareAttempt.status, 404, "Another account must not revoke an owner's share link.");
+
+    const revokePlanPool = new Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      await revokePlanPool.query("UPDATE users SET manual_pro = FALSE WHERE id = $1", [ownerUserBody.user.id as string]);
+    } finally {
+      await revokePlanPool.end();
+    }
+    const revokeResponse = await fetch(`${otherSession.origin}/api/plays/${created.id}/share`, {
+      method: "DELETE",
+      headers: { Cookie: ownerCookie, Origin: otherSession.origin },
+    });
+    assert.equal(revokeResponse.status, 204, "A downgraded owner must still be able to revoke a share link.");
+    assert.equal((await fetch(`${otherSession.origin}/api/share/${shareToken}`)).status, 404);
 
     const ownerDelete = await fetch(`${otherSession.origin}/api/plays/${created.id}`, {
       method: "DELETE",

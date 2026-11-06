@@ -20,6 +20,7 @@ interface DrawingCanvasProps {
   onSelectElement: (id: string | null) => void;
   animationProgress: number;
   isAnimating: boolean;
+  readOnly?: boolean;
 }
 
 export interface DrawingCanvasHandle {
@@ -39,6 +40,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
   onSelectElement,
   animationProgress,
   isAnimating,
+  readOnly = false,
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -469,6 +471,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
         touchAction: "none",
         WebkitUserSelect: "none",
         userSelect: "none",
+        pointerEvents: readOnly ? "none" : "auto",
       }}
     >
       <Stage
@@ -579,7 +582,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
               fontFamily="Montserrat, sans-serif"
               fontStyle={annotation.fontWeight}
               fill={annotation.color}
-              draggable={activeTool === "select"}
+              draggable={!readOnly && activeTool === "select"}
               onClick={() => onSelectElement(annotation.id)}
               onTap={() => onSelectElement(annotation.id)}
               onDragEnd={(e) => {

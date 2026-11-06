@@ -1,8 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { type User, type InsertUser, type Play, type InsertPlay, plays, users } from "@shared/schema";
-import { createHash, randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -16,6 +16,9 @@ export interface IStorage {
   createPlay(play: InsertPlay, userId: string): Promise<Play>;
   updatePlay(id: string, play: Partial<InsertPlay>, userId: string): Promise<Play | undefined>;
   deletePlay(id: string, userId: string): Promise<boolean>;
+  getPlayByShareToken(token: string): Promise<Play | undefined>;
+  createPlayShareToken(id: string, userId: string): Promise<Play | undefined>;
+  clearPlayShareToken(id: string, userId: string): Promise<Play | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -132,6 +135,32 @@ export class MemStorage implements IStorage {
     const existing = this.plays.get(id);
     return !!existing && existing.userId === userId && this.plays.delete(id);
   }
+
+  async getPlayByShareToken(token: string): Promise<Play | undefined> {
+    return Array.from(this.plays.values()).find((play) => play.shareToken === token);
+  }
+
+  async createPlayShareToken(id: string, userId: string): Promise<Play | undefined> {
+    const existing = await this.getPlay(id, userId);
+    if (!existing) return undefined;
+    if (existing.shareToken) return existing;
+
+    const updated: Play = {
+      ...existing,
+      shareToken: randomBytes(32).toString("base64url"),
+      updatedAt: new Date(),
+    };
+    this.plays.set(id, updated);
+    return updated;
+  }
+
+  async clearPlayShareToken(id: string, userId: string): Promise<Play | undefined> {
+    const existing = await this.getPlay(id, userId);
+    if (!existing) return undefined;
+    const updated: Play = { ...existing, shareToken: null, updatedAt: new Date() };
+    this.plays.set(id, updated);
+    return updated;
+  }
 }
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -195,6 +224,31 @@ export class DatabaseStorage implements IStorage {
     const deleted = await db.delete(plays)
       .where(and(eq(plays.id, id), eq(plays.userId, userId))).returning({ id: plays.id });
     return deleted.length > 0;
+  }
+
+  async getPlayByShareToken(token: string): Promise<Play | undefined> {
+    const [play] = await db.select().from(plays).where(eq(plays.shareToken, token)).limit(1);
+    return play;
+  }
+
+  async createPlayShareToken(id: string, userId: string): Promise<Play | undefined> {
+    const existing = await this.getPlay(id, userId);
+    if (!existing) return undefined;
+    if (existing.shareToken) return existing;
+
+    const [updated] = await db.update(plays)
+      .set({ shareToken: randomBytes(32).toString("base64url"), updatedAt: new Date() })
+      .where(and(eq(plays.id, id), eq(plays.userId, userId), isNull(plays.shareToken)))
+      .returning();
+    return updated ?? this.getPlay(id, userId);
+  }
+
+  async clearPlayShareToken(id: string, userId: string): Promise<Play | undefined> {
+    const [updated] = await db.update(plays)
+      .set({ shareToken: null, updatedAt: new Date() })
+      .where(and(eq(plays.id, id), eq(plays.userId, userId)))
+      .returning();
+    return updated;
   }
 }
 

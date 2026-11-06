@@ -19,6 +19,7 @@ export interface ClientPlay {
   description: string | null;
   sport: string;
   tags: string[] | null;
+  shareToken?: string | null;
   data: PlayData;
   createdAt: string;
   updatedAt: string;
@@ -50,6 +51,7 @@ function toClientPlay(play: {
   description: string | null;
   sport: string;
   tags: string[] | null;
+  shareToken?: string | null;
   data: PlayData;
   createdAt: string | Date | null;
   updatedAt: string | Date | null;
@@ -61,6 +63,7 @@ function toClientPlay(play: {
     description: play.description,
     sport: play.sport,
     tags: play.tags,
+    shareToken: play.shareToken ?? null,
     data: play.data,
     createdAt: play.createdAt ? new Date(play.createdAt).toISOString() : now,
     updatedAt: play.updatedAt ? new Date(play.updatedAt).toISOString() : now,
@@ -114,6 +117,46 @@ export async function updateAccountPlay(
 
 export async function deleteAccountPlay(id: string, signal?: AbortSignal): Promise<void> {
   await apiRequest("DELETE", `/api/plays/${encodeURIComponent(id)}`, undefined, signal);
+}
+
+export async function createAccountPlayShareToken(id: string, signal?: AbortSignal): Promise<string> {
+  const response = await apiRequest("POST", `/api/plays/${encodeURIComponent(id)}/share`, {}, signal);
+  const result = await response.json() as { shareToken?: string };
+  if (!result.shareToken) throw new Error("The server did not return a share link.");
+  return result.shareToken;
+}
+
+export async function stopAccountPlaySharing(id: string, signal?: AbortSignal): Promise<void> {
+  await apiRequest("DELETE", `/api/plays/${encodeURIComponent(id)}/share`, undefined, signal);
+}
+
+export async function fetchSharedPlay(token: string, signal?: AbortSignal): Promise<ClientPlay> {
+  const response = await fetch(`/api/share/${encodeURIComponent(token)}`, {
+    credentials: "omit",
+    signal,
+  });
+  if (response.status === 404) throw new Error("SHARE_NOT_FOUND");
+  if (!response.ok) throw new Error("Could not load this shared play.");
+  return toClientPlay(await response.json() as Parameters<typeof toClientPlay>[0]);
+}
+
+export async function copyShareLink(link: string): Promise<void> {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+    await navigator.clipboard.writeText(link);
+    return;
+  } catch {
+    const fallback = document.createElement("textarea");
+    fallback.value = link;
+    fallback.setAttribute("readonly", "");
+    fallback.style.position = "fixed";
+    fallback.style.opacity = "0";
+    document.body.appendChild(fallback);
+    fallback.select();
+    const copied = document.execCommand("copy");
+    fallback.remove();
+    if (!copied) throw new Error("Could not copy share link.");
+  }
 }
 
 function getDefaultPlayData(sport: SportType = "basketball"): PlayData {

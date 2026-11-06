@@ -12,6 +12,7 @@ interface AnimationControlsProps {
   onReset: () => void;
   onProgressChange: (value: number) => void;
   onSpeedChange: (value: number) => void;
+  readOnly?: boolean;
 }
 
 export function AnimationControls({
@@ -23,6 +24,7 @@ export function AnimationControls({
   onReset,
   onProgressChange,
   onSpeedChange,
+  readOnly = false,
 }: AnimationControlsProps) {
   const formatTime = (seconds: number) => {
     const s = Math.floor(seconds);
@@ -33,21 +35,23 @@ export function AnimationControls({
   return (
     <div className="flex items-center gap-3 p-3 bg-card border border-card-border rounded-md shadow-lg">
       <div className="flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onReset}
-              data-testid="button-reset-animation"
-            >
-              <RotateCcw className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Reset</p>
-          </TooltipContent>
-        </Tooltip>
+        {!readOnly && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onReset}
+                data-testid="button-reset-animation"
+              >
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Reset</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -89,41 +93,43 @@ export function AnimationControls({
         </span>
       </div>
 
-      <div className="flex items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onSpeedChange(Math.max(0.25, speed - 0.25))}
-              data-testid="button-speed-down"
-            >
-              <Rewind className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Slower</p>
-          </TooltipContent>
-        </Tooltip>
+      {!readOnly && (
+        <div className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onSpeedChange(Math.max(0.25, speed - 0.25))}
+                data-testid="button-speed-down"
+              >
+                <Rewind className="h-3 w-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Slower</p>
+            </TooltipContent>
+          </Tooltip>
 
-        <span className="text-xs font-medium w-10 text-center">{speed}x</span>
+          <span className="text-xs font-medium w-10 text-center">{speed}x</span>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onSpeedChange(Math.min(3, speed + 0.25))}
-              data-testid="button-speed-up"
-            >
-              <FastForward className="h-3 w-3" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Faster</p>
-          </TooltipContent>
-        </Tooltip>
-      </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onSpeedChange(Math.min(3, speed + 0.25))}
+                data-testid="button-speed-up"
+              >
+                <FastForward className="h-3 w-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Faster</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      )}
     </div>
   );
 }
